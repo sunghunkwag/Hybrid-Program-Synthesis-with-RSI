@@ -16,9 +16,23 @@ This repository contains an autonomous algorithm discovery system implementing R
 * **Rust Acceleration**: The core execution loop is rewriting in Rust. The system automatically detects and loads the optimized `rs_machine` binary if installed, falling back to Python transparently if not.
 * **Autonomous Goal Discovery**: The system no longer relies solely on external tasks but can formulate its own "purpose" based on environmental novelty and pattern consistency.
 
+## Installation & Build
+
+To unlock High-Performance Mode (Rust VM), you must compile the extension:
+
+1. **Install Rust**: Ensure you have `cargo` and the Rust toolchain installed.
+2. **Install Build Tool**: `pip install maturin`
+3. **Compile Extension**:
+   ```bash
+   cd rs_machine
+   maturin develop --release
+   cd ..
+   ```
+   *(Note: On Windows, use a Developer Command Prompt if you encounter linker errors)*
+
 ## Usage
 
-Run the infinite life-cycle loop:
+Once built, simply run the infinite life-cycle loop. The system will automatically detect the Rust engine:
 
 ```bash
 python Systemtest.py hrm-life
