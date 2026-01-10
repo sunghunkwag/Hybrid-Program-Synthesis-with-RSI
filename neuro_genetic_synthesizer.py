@@ -12,7 +12,146 @@ from typing import List, Dict, Any, Tuple, Optional, Callable
 
 
 # ==============================================================================
+# RUST MACHINE OPTIMIZATION
+# ==============================================================================
+try:
+    # Trick to prioritize the installed 'rs_machine' package over the local folder
+    import sys
+    import os
+    _original_path = list(sys.path)
+    _cwd = os.getcwd()
+    # Temporarily remove current dir
+    sys.path = [p for p in sys.path if p != _cwd and p != '']
+    
+    import rs_machine
+    
+    # Restore path
+    sys.path = _original_path
+    
+    if hasattr(rs_machine, "VirtualMachine"):
+        HAS_RUST_VM = True
+        print("[NeuroGen] [OK] Rust Virtual Machine loaded for acceleration.")
+    else:
+        HAS_RUST_VM = False
+except ImportError:
+    HAS_RUST_VM = False
+    print("[NeuroGen] [INFO] Rust VM not found. Running in slow Python mode.")
+
+class RustCompiler:
+    """JIT Compiler from BSExpr (Tree) to rs_machine.Instruction (Linear)."""
+    def __init__(self):
+        self.code = []
+        
+    def compile(self, expr) -> Optional[List[Any]]:
+        self.code = []
+        try:
+            self._compile_recursive(expr, target_reg=0)
+            # Add HALT to stop execution explicitly, though VM halts on instruction end.
+            # But adding HALT is safer for some loop constructs if we had them.
+            # rs_machine Instruction signature: (op, a, b, c) - all ints
+            return [rs_machine.Instruction(op, int(a), int(b), int(c)) for op, a, b, c in self.code]
+        except Exception:
+            return None
+            
+    def _compile_recursive(self, expr, target_reg):
+        if target_reg > 7:
+            raise ValueError("Register spill (depth > 8)")
+            
+        if isinstance(expr, BSVal):
+            # SET val, 0, target_reg
+            self.code.append(("SET", int(expr.val), 0, target_reg))
+            
+        elif isinstance(expr, BSVar):
+            # Assume 'n' input is at memory[0].
+            # We need a register to hold the address 0.
+            # Use target_reg to hold 0, then LOAD from it.
+            self.code.append(("SET", 0, 0, target_reg))    # reg = 0 (pointer)
+            self.code.append(("LOAD", target_reg, 0, target_reg)) # reg = memory[reg + 0]
+            
+        elif isinstance(expr, BSApp):
+            fn = expr.func
+            
+            # Binary Operators
+            if fn in ['add', 'sub', 'mul', 'div']:
+                # Compile LHS to target_reg
+                self._compile_recursive(expr.args[0], target_reg)
+                # Compile RHS to target_reg + 1
+                self._compile_recursive(expr.args[1], target_reg + 1)
+                
+                ops = {'add': 'ADD', 'sub': 'SUB', 'mul': 'MUL', 'div': 'DIV'}
+                # OP target_reg, target_reg+1, target_reg
+                self.code.append((ops[fn], target_reg, target_reg + 1, target_reg))
+                
+            elif fn == 'mod':
+                # Special case: rs_machine might not support MOD directly if not in primitives.
+                # Systemtest.py instructions: MOV, SET, SWAP, ADD, SUB, MUL, DIV, INC, DEC, LOAD, STORE, LDI, STI, JMP...
+                # No MOD instruction in generic rs_machine?
+                # Let's check Systemtest.py's _step function.
+                # op == "DIV": r[c] = r[a] / r[b]
+                # No MOD. So we fail compilation for mod.
+                raise ValueError("MOD instruction not supported in rs_machine")
+                
+            elif fn == 'if_gt':
+                # if_gt(a, b, c, d) -> if a > b then c else d
+                # 1. Compile A -> target
+                self._compile_recursive(expr.args[0], target_reg)
+                # 2. Compile B -> target + 1
+                self._compile_recursive(expr.args[1], target_reg + 1)
+                
+                # 3. Compile D (Else) first (to verify length)
+                # We need to compile to detailed lists to measure jump offsets.
+                # This is tricky in one pass.
+                # Strategy: Compile C and D into temp buffers.
+                
+                c_compiler = RustCompiler()
+                c_compiler._compile_recursive(expr.args[2], target_reg) # Result to target
+                c_code = c_compiler.code
+                
+                d_compiler = RustCompiler()
+                d_compiler._compile_recursive(expr.args[3], target_reg) # Result to target
+                d_code = d_compiler.code
+                
+                # JGT target, target+1, <skip_d_and_jump>
+                # But rs_machine JGT: if r[a] > r[b] pc += c
+                # Layout:
+                # [A]
+                # [B]
+                # JGT target, target+1, len(d_code) + 2 (jump over D and the jump-over-C)
+                # [D code]
+                # JMP len(c_code) + 1, 0, 0
+                # [C code]
+                
+                # Note: rs_machine JMP offset is relative to current PC?
+                # Systemtest.py: st.pc += int(a). JMP 1 means next instruction?
+                # No, st.pc += 1 happens automatically if no jump.
+                # JMP: st.pc += int(a); jump=True.
+                # So JMP 1 skips 0 instructions? 
+                # If current is PC. JMP 1 sets PC = PC + 1. Next loop PC increments? 
+                # Systemtest.py loop:
+                #   if jump: (no increment).
+                # So JMP 1 -> PC becomes PC+1. Next iter fetches PC+1. Effectively standard flow.
+                # To skip N instructions, we need JMP N+1.
+                # Example: JMP 2 -> skips 1 instruction.
+                
+                skip_d_offset = len(d_code) + 2 # Skip D + Skip JMP
+                self.code.append(("JGT", target_reg, target_reg + 1, skip_d_offset))
+                
+                # Else Block (D)
+                self.code.extend(d_code)
+                
+                # Jump over C
+                skip_c_offset = len(c_code) + 1
+                self.code.append(("JMP", skip_c_offset, 0, 0))
+                
+                # Then Block (C)
+                self.code.extend(c_code)
+                
+            else:
+                raise ValueError(f"Unknown op: {fn}")
+
+# ==============================================================================
 # AST Nodes
+
 # ==============================================================================
 
 # ==============================================================================
@@ -343,6 +482,53 @@ class NeuroGeneticSynthesizer:
         return features
 
     def _fitness(self, expr, ios, fast=False):
+        # 1. Try Rust Acceleration
+        jit_score = None
+        if HAS_RUST_VM and self.num_islands > 0: # Ensure we are in a valid state
+            try:
+                compiler = RustCompiler()
+                instructions = compiler.compile(expr)
+                if instructions:
+                    # Execute on Rust VM
+                    # Note: We need a fresh VM or reuse one. Creating generic VM is cheap?
+                    # Systemtest.py uses VirtualMachine(max_steps=400, ...)
+                    # We can instantiate rs_machine.VirtualMachine directly.
+                    # rs_machine.VirtualMachine(max_steps, mem_size, stack_limit)
+                    vm = rs_machine.VirtualMachine(100, 64, 16)
+                    
+                    score = 0
+                    for io in ios:
+                        # Prepare input memory. 'n' is mapped to mem[0].
+                        # Rust VM execute takes inputs list.
+                        inp_val = float(io['input'])
+                        # If input is list, use it; if scalar, wrap.
+                        if isinstance(io['input'], list):
+                             # Not supported by simple compiler yet (scalar assumption)
+                             raise ValueError("List input not supported in JIT")
+                        
+                        st = vm.execute(instructions, [inp_val])
+                        
+                        # Result in regs[0] (target_reg 0)
+                        # We verify clean halt?
+                        # if not st.halted_cleanly: score -= ...?
+                        # NeuroGen simple fitness just checks equality.
+                        
+                        # rs_machine.ExecutionState.regs is a list
+                        out = st.regs[0]
+                        
+                        expected = io['output']
+                        if abs(out - expected) < 1e-9:
+                             score += 1
+                        elif not fast:
+                             diff = abs(out - expected)
+                             if diff < 100: score += 1.0 / (1.0 + diff)
+                             
+                    return (score / len(ios)) * 100.0
+            except Exception as e:
+                # Fallback to Python if compilation/execution fails (e.g. MOD op, depth)
+                pass
+
+        # 2. Python Fallback
         score = 0
         for io in ios:
             out = self.interp.run(expr, { 'n': io['input'] })

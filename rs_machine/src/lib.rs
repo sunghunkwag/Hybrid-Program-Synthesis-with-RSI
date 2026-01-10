@@ -4,9 +4,13 @@ use std::collections::{HashMap, HashSet};
 #[derive(Clone, Debug)]
 #[pyclass]
 struct Instruction {
+    #[pyo3(get, set)]
     op: String,
+    #[pyo3(get, set)]
     a: i32,
+    #[pyo3(get, set)]
     b: i32,
+    #[pyo3(get, set)]
     c: i32,
 }
 
