@@ -7,16 +7,14 @@ This repository contains an autonomous algorithm discovery system implementing R
 ## Core Components
 
 * **Systemtest.py**: Main orchestrator handling the life-cycle loop, problem generation, and H-Module (Discovery) / L-Module (Execution) coordination.
-* **neuro_genetic_synthesizer.py**: Implements a pure-Python Neural Network (`SimpleNN`) with manual Backpropagation (Stochastic Gradient Descent). It guides the genetic search without external dependencies like PyTorch.
+* **rs_machine (Rust)**: High-performance Virtual Machine implementation using PyO3. Accelerates program evaluation by orders of magnitude compared to the Python fallback.
+* **SelfPurposeEngine**: Autonomous goal definition system that detects emergent patterns in the environment to formulate internal objectives.
+* **ConceptTransferEngine**: Mechanism for generalizing learned concepts to new, unseen domains (Human-Level Generalization).
 
-## Capabilities
+## New Capabilities: High Performance & Autonomy
 
-1. **Genuine Learning**: Uses mathematical gradient descent to update neural weights based on successful program evaluations.
-2. **No Heuristics**: All hardcoded strategies and template-based searchers have been removed. Solutions are found solely through stochastic search and neural guidance.
-3. **Recursive Self-Improvement (RSI)**: Functions discovered by the system are archived and dynamically loaded into the synthesis grammar, allowing the system to reuse its own inventions for future tasks.
-4. **Curriculum Learning**: Autonomous task generation that respects a strict difficulty curve, ensuring the system masters basic concepts (Level 1) before attempting complex logic (Level 3+).
-5. **Island Model Evolution**: Maintains multiple isolated populations (islands) with periodic migration, preserving genetic diversity and preventing premature convergence.
-6. **Novelty Search**: Incentivizes the discovery of rare code patterns (N-gram rarity) to escape local optima.
+* **Rust Acceleration**: The core execution loop is rewriting in Rust. The system automatically detects and loads the optimized `rs_machine` binary if installed, falling back to Python transparently if not.
+* **Autonomous Goal Discovery**: The system no longer relies solely on external tasks but can formulate its own "purpose" based on environmental novelty and pattern consistency.
 
 ## Usage
 
@@ -26,13 +24,10 @@ Run the infinite life-cycle loop:
 python Systemtest.py hrm-life
 ```
 
-This will start the autonomous loop:
-
-1. L-Module: Wakes up and attempts to solve generated tasks using the current neural model.
-2. H-Module: Dreams on accumulated experiences to discover new subroutines.
-3. Feedback: Updates neural weights and expands the primitive set with new concepts.
-
 ## Requirements
 
 * Python 3.8+
-* Standard library only (No `numpy`, `torch`, or other heavy dependencies required).
+* Rust Toolchain & Cargo (for compiling `rs_machine`)
+* `maturin` (for building the Python-Rust bridge)
+* Standard library only for fallback mode.
+
