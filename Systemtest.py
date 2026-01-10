@@ -105,6 +105,34 @@ except ImportError as e:
     print(f"[Systemtest] [WARN] SelfPurposeEngine not found: {e}")
 
 # ==============================================================================
+# RUST VIRTUAL MACHINE INTEGRATION (Performance Booster)
+# ==============================================================================
+try:
+    # Trick to prioritize the installed 'rs_machine' package over the local folder
+    import sys
+    import os
+    _original_path = list(sys.path)
+    _cwd = os.getcwd()
+    # Temporarily remove current dir to avoid finding the source folder
+    sys.path = [p for p in sys.path if p != _cwd and p != '']
+    
+    import rs_machine
+    
+    # Restore path immediately
+    sys.path = _original_path
+    
+    # Verify it's the right one
+    if hasattr(rs_machine, "VirtualMachine"):
+        HAS_RUST_VM = True
+        print("[Systemtest] [OK] Rust Virtual Machine loaded (High Performance Mode).")
+    else:
+        HAS_RUST_VM = False
+        print("[Systemtest] [INFO] rs_machine imported but missing logic. Using Python fallback.")
+except ImportError:
+    HAS_RUST_VM = False
+    print("[Systemtest] [INFO] Rust VM not found. Using Python fallback.")
+
+# ==============================================================================
 # USER-INJECTED COMPONENTS (Optimizer & SimulationComponent)
 # ==============================================================================
 
@@ -503,6 +531,20 @@ class VirtualMachine:
         return ExecutionState(regs=regs, memory=mem)
 
     def execute(self, genome: ProgramGenome, inputs: List[float]) -> ExecutionState:
+        # -----------------------------------------------------------
+        # Rust VM Path (High Performance)
+        # -----------------------------------------------------------
+        if HAS_RUST_VM:
+            try:
+                return self._execute_rust(genome, inputs)
+            except Exception as e:
+                # If conversion fails or runtime error, fallback silently or log
+                # print(f"[RustVM Fallback] {e}") 
+                pass
+
+        # -----------------------------------------------------------
+        # Python VM Path (Legacy / Fallback)
+        # -----------------------------------------------------------
         st = self.reset(inputs)
         code = genome.instructions
         L = len(code)
@@ -544,7 +586,47 @@ class VirtualMachine:
                 st.conditional_branches += 1
             st.max_call_depth = max(st.max_call_depth, len(st.stack))
 
+
+
         return st
+
+    def _execute_rust(self, genome: ProgramGenome, inputs: List[float]) -> ExecutionState:
+        """
+        Delegates execution to the Rust backend.
+        Converts inputs/outputs to maintain compatibility.
+        """
+        # Cache Rust instructions on the genome object to avoid repeated allocation
+        if not hasattr(genome, "_rust_instructions"):
+            genome._rust_instructions = [
+                rs_machine.Instruction(i.op, int(i.a), int(i.b), int(i.c))
+                for i in genome.instructions
+            ]
+        
+        # Create Rust VM instance (lightweight wrapper around struct)
+        rust_vm = rs_machine.VirtualMachine(int(self.max_steps), int(self.memory_size), int(self.stack_limit))
+        
+        # Execute
+        rst = rust_vm.execute(genome._rust_instructions, inputs)
+        
+        # Convert back to Python ExecutionState dataclass for compatibility
+        # Note: Creating a new dataclass instance is fast.
+        return ExecutionState(
+            regs=list(rst.regs),
+            memory=dict(rst.memory),
+            pc=rst.pc,
+            stack=list(rst.stack),
+            steps=rst.steps,
+            halted=rst.halted,
+            halted_cleanly=rst.halted_cleanly,
+            error=rst.error,
+            trace=list(rst.trace),
+            visited_pcs=set(rst.visited_pcs),
+            loops_count=rst.loops_count,
+            conditional_branches=rst.conditional_branches,
+            max_call_depth=rst.max_call_depth,
+            memory_reads=rst.memory_reads,
+            memory_writes=rst.memory_writes
+        )
 
     def _step(self, st: ExecutionState, inst: Instruction) -> None:
         op, a, b, c = inst.op, inst.a, inst.b, inst.c

@@ -5,3 +5,17 @@ __pycache__/
 .idea/
 tmp/
 *.tmp
+
+# Runtime Data
+checkpoints/
+rsi_state.pkl
+temp_repo/
+scig_rsi/
+scig_rsi_repo/
+
+# Rust
+rs_machine/target/
+rs_machine/Cargo.lock
+
+# Python Virtual Env
+.venv/
