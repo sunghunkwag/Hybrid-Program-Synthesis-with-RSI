@@ -1415,13 +1415,14 @@ class NeuroGeneticSynthesizer:
         # Step 3: Compile and create new function
         try:
             # Create execution namespace with access to required modules
+            # 'synthesizer' is used as closure variable in evolved functions
             exec_namespace = {
                 'random': random,
                 'math': math,
                 'BSApp': BSApp,
                 'BSVar': BSVar,
                 'BSVal': BSVal,
-                'self': self,
+                'synthesizer': self,  # Closure reference for evolved functions
             }
             
             exec(new_code, exec_namespace)
@@ -1443,10 +1444,9 @@ class NeuroGeneticSynthesizer:
             # Step 4: Sandbox test - try calling with dummy args
             print("[SynthMod] Sandbox test passed (compilation successful)")
             
-            # Step 5: Replace method on instance
-            import types
-            bound_method = types.MethodType(new_func, self)
-            setattr(self, method_name, bound_method)
+            # Step 5: Set function directly as attribute
+            # No binding needed since function uses 'synthesizer' closure instead of self parameter
+            setattr(self, method_name, new_func)
             
             print(f"[SynthMod] SUCCESS: Replaced {method_name} at runtime")
             
@@ -1491,26 +1491,27 @@ class NeuroGeneticSynthesizer:
             print("[SynthMod] Performance degrading - evolving mutation strategy")
             
             # Generate improved mutation variant
+            # Note: Keeps (self, p, op_probs) signature to match existing call sites
+            # But uses 'synthesizer' closure for internal method calls
             improved_mutate = '''
 def _mutate(self, p, op_probs):
-    """Evolved mutation with adaptive depth control."""
+    """Evolved mutation with adaptive depth control (closure-based)."""
     if p is None:
-        return self._generate_random_expr(2, op_probs)
+        return synthesizer._generate_random_expr(2, op_probs)
     
     # Adaptive mutation based on expression size
-    expr_size = self._size(p)
+    expr_size = synthesizer._size(p)
     mutation_prob = max(0.1, 0.5 - expr_size * 0.05)
 
-    
     if random.random() < mutation_prob:
-        return self._generate_random_expr(max(2, 4 - expr_size // 2), op_probs)
+        return synthesizer._generate_random_expr(max(2, 4 - expr_size // 2), op_probs)
     
     if isinstance(p, BSApp):
-        # Mutate arguments with decreasing probability
+        # Mutate arguments by regenerating small expressions (no recursion)
         new_args = []
         for i, arg in enumerate(p.args):
             if random.random() < (0.3 / (i + 1)):
-                new_args.append(self._mutate(arg, op_probs))
+                new_args.append(synthesizer._generate_random_expr(1, op_probs))
             else:
                 new_args.append(arg)
         return BSApp(p.func, new_args)
@@ -1518,6 +1519,9 @@ def _mutate(self, p, op_probs):
     return p
 '''
             return self.self_modify_method('_mutate', improved_mutate)
+
+
+
 
         
         return False
@@ -1748,9 +1752,10 @@ def _mutate(self, p, op_probs):
             if len(self.fitness_history) > 100:
                 self.fitness_history = self.fitness_history[-100:]  # Keep last 100
             
-            # [RUNTIME RSI] Auto-evolution disabled for stability
-            # To enable manual evolution: synthesizer.evolve_mutation_strategy(history)
-            # if len(self.fitness_history) % 20 == 0:
+            # [RUNTIME RSI] Auto-evolution disabled due to Python descriptor protocol limitations
+            # The setattr approach doesn't properly bind methods at runtime
+            # Manual evolution can still be called: synthesizer.evolve_mutation_strategy(history)
+            # if len(self.fitness_history) % 20 == 0 and len(self.fitness_history) >= 10:
             #     self.evolve_mutation_strategy(self.fitness_history)
             
             return [(str(best_solution[1]), best_solution[1], self._size(best_solution[1]), best_fitness)]
