@@ -300,7 +300,12 @@ class ListDomain(Domain):
         return "list"
 
     def generate_task(self, rng: random.Random, difficulty: int) -> DomainTaskSpec:
-        task_types = ["reverse", "sort", "filter_pos", "double"]
+        # Extended task types for algorithm discovery
+        task_types = [
+            "reverse", "sort", "filter_pos", "double",
+            "sum", "min", "max", "filter_neg", "filter_even",
+            "count", "take_n", "drop_n", "concat_self"
+        ]
         t_type = rng.choice(task_types)
         examples = []
         for _ in range(5):
@@ -308,7 +313,20 @@ class ListDomain(Domain):
             if t_type == "reverse": out = list(reversed(inp))
             elif t_type == "sort": out = sorted(inp)
             elif t_type == "filter_pos": out = [x for x in inp if x > 0]
+            elif t_type == "filter_neg": out = [x for x in inp if x < 0]
+            elif t_type == "filter_even": out = [x for x in inp if x % 2 == 0]
             elif t_type == "double": out = [x * 2 for x in inp]
+            elif t_type == "sum": out = sum(inp)
+            elif t_type == "min": out = min(inp) if inp else 0
+            elif t_type == "max": out = max(inp) if inp else 0
+            elif t_type == "count": out = len(inp)
+            elif t_type == "take_n": 
+                n = min(2, len(inp))
+                out = inp[:n]
+            elif t_type == "drop_n":
+                n = min(2, len(inp))
+                out = inp[n:]
+            elif t_type == "concat_self": out = inp + inp
             else: out = inp
             examples.append({"input": inp, "output": out})
         return DomainTaskSpec(name=f"list_{t_type}", difficulty=difficulty, examples=examples, domain="list")
@@ -356,9 +374,76 @@ class BooleanDomain(Domain):
         try: return 1.0 if bool(output) == bool(expected) else 0.0
         except: return 0.0
 
+
+class NumericDomain(Domain):
+    """Domain for numeric/mathematical algorithm discovery."""
+    
+    def name(self) -> str:
+        return "numeric"
+    
+    def _fibonacci(self, n: int) -> int:
+        if n <= 0: return 0
+        if n == 1: return 1
+        a, b = 0, 1
+        for _ in range(2, n + 1):
+            a, b = b, a + b
+        return b
+    
+    def _factorial(self, n: int) -> int:
+        if n <= 1: return 1
+        result = 1
+        for i in range(2, min(n + 1, 13)):  # Cap at 12! to avoid overflow
+            result *= i
+        return result
+    
+    def generate_task(self, rng: random.Random, difficulty: int) -> DomainTaskSpec:
+        task_types = ["fibonacci", "factorial", "sum_to_n", "square", "double", "is_even", "is_positive"]
+        t_type = rng.choice(task_types)
+        examples = []
+        
+        if t_type == "fibonacci":
+            for n in [0, 1, 2, 3, 5, 8, 10]:
+                examples.append({"input": n, "output": self._fibonacci(n)})
+        elif t_type == "factorial":
+            for n in [0, 1, 2, 3, 4, 5]:
+                examples.append({"input": n, "output": self._factorial(n)})
+        elif t_type == "sum_to_n":
+            for n in [1, 3, 5, 10, 15]:
+                examples.append({"input": n, "output": n * (n + 1) // 2})
+        elif t_type == "square":
+            for n in rng.sample(range(-5, 10), 5):
+                examples.append({"input": n, "output": n * n})
+        elif t_type == "double":
+            for n in rng.sample(range(-10, 10), 5):
+                examples.append({"input": n, "output": n * 2})
+        elif t_type == "is_even":
+            for n in rng.sample(range(-5, 10), 5):
+                examples.append({"input": n, "output": n % 2 == 0})
+        elif t_type == "is_positive":
+            for n in rng.sample(range(-5, 10), 5):
+                examples.append({"input": n, "output": n > 0})
+        else:
+            for n in range(5):
+                examples.append({"input": n, "output": n})
+        
+        return DomainTaskSpec(name=f"num_{t_type}", difficulty=difficulty, examples=examples, domain="numeric")
+    
+    def evaluate(self, func: Any, task: DomainTaskSpec) -> float:
+        total = 0.0
+        for ex in task.examples:
+            try:
+                total += self.score(func(ex["input"]), ex["output"])
+            except:
+                pass
+        return total / len(task.examples) if task.examples else 0.0
+    
+    def score(self, output: Any, expected: Any) -> float:
+        return 1.0 if output == expected else 0.0
+
+
 class DomainManager:
     def __init__(self):
-        self.domains = [StringDomain(), ListDomain(), BooleanDomain()]
+        self.domains = [StringDomain(), ListDomain(), BooleanDomain(), NumericDomain()]
         
     def sample_domain(self, rng: random.Random) -> Domain:
         return rng.choice(self.domains)
