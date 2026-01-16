@@ -6,11 +6,11 @@ A hybrid program synthesis engine implementing Recursive Self-Improvement (RSI) 
 
 The system is built on four safety pillars:
 
-### 1. Process Isolation (WatchdogExecutor)
-Executes all generated code in a separate process using `multiprocessing`.
-- Enforces strict timeouts (default 2.0s) to prevent infinite loops.
-- Captures stdout and return values without affecting the main process.
-- No language-level restrictions (allows full `exec`), relying on process boundaries for safety.
+### 1. Watchdog Sandbox (Process Isolation)
+Executes all generated code in a separate process/sandbox (The "Watchdog").
+- **Crash Protection**: Total isolation ensures the main system never crashes, even if the AI generates infinite loops or segmentation faults.
+- **Strict Monitoring**: Enforces hard timeouts (default 2.0s) and resource limits.
+- **Unrestricted Learning**: Allows full python `exec()` within the box, enabling the AI to learn real coding without risking the host.
 
 ### 2. Safe Interpreter
 AST-based interpreter for DSL execution.
