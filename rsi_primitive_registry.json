@@ -2,7 +2,7 @@
   "concept_12": {
     "code": "reverse(eq(add(n, n), add(n, n)))",
     "level": 1,
-    "usage": 3455,
+    "usage": 3456,
     "weight": 100.0,
     "hash": "a6b280ecfcc85697710817cfe364cafdc3d5dbfcf46364c3dd331c066a909c91"
   },
@@ -163,7 +163,7 @@
   "concept_35": {
     "code": "reverse(reverse(len(n)))",
     "level": 1,
-    "usage": 432,
+    "usage": 433,
     "weight": 100.0,
     "hash": "e58b8cfbd6de501f3a6553d2325d394df642bd0ae43061c1d2560f1368d89e78"
   },
@@ -233,7 +233,7 @@
   "concept_45": {
     "code": "not_op(concept_20(n, n))",
     "level": 2,
-    "usage": 434,
+    "usage": 435,
     "weight": 100.0,
     "hash": "e924d4fe75c405bcdbe9c622a5629df73211c6da481f6a029a8b26ed3e663beb"
   },
@@ -282,7 +282,7 @@
   "concept_52": {
     "code": "not_op(concept_22(n, n))",
     "level": 3,
-    "usage": 452,
+    "usage": 453,
     "weight": 100.0,
     "hash": "63a441ecf13be205a1366b18c85dfccf136e652534b86bed49d355f7123431f5"
   },
@@ -296,7 +296,7 @@
   "concept_54": {
     "code": "not_op(concept_52(concept_25(n, n), concept_14(concept_42(n, n), concept_34(n, n))))",
     "level": 4,
-    "usage": 429,
+    "usage": 430,
     "weight": 100.0,
     "hash": "19c0a8143d7fa8b987401a6ae320917f4f8fa6ddd7cdac523ab6b7055d1ff854"
   },
@@ -338,7 +338,7 @@
   "concept_60": {
     "code": "not_op(concept_53(n, n))",
     "level": 5,
-    "usage": 425,
+    "usage": 426,
     "weight": 100.0,
     "hash": "f82d57c6d0e68cd795f62b57cba9225142c1919dabd503806d1da9c076aa0fed"
   },
@@ -485,7 +485,7 @@
   "concept_129": {
     "code": "or_op(concept_113(reverse(n), concept_51(n, n)), n)",
     "level": 3,
-    "usage": 332,
+    "usage": 333,
     "weight": 100.0,
     "hash": "3b9bc21f4c279494385bd42dcbac98da51bccdc0bf2a02be4d2b6ba231faf5fb"
   },
@@ -747,5 +747,19 @@
     "usage": 1,
     "weight": 5.0,
     "hash": "41d5982ccf7f2df83ca659a0d0dbdfcf2af78f775064eaf181af4c1981c4248e"
+  },
+  "concept_172": {
+    "code": "prod_list(max_list(concept_54(concept_35(n, n), concept_52(count_list(concept_45(n, n)), n))))",
+    "level": 5,
+    "usage": 1,
+    "weight": 5.0,
+    "hash": "c81048830aeecb9889a5af62e716c41f946c646c6c940b10857c22ed4e2c74af"
+  },
+  "concept_173": {
+    "code": "count_list(abs_val(n))",
+    "level": 1,
+    "usage": 1,
+    "weight": 5.0,
+    "hash": "e5913961433b577bbbe8d4a1d4cd9b1538870ec0d4485e9e16f81246799b3d9c"
   }
 }

@@ -857,6 +857,10 @@ class NeuroGeneticSynthesizer:
         self.library = LibraryManager()
         self.interpreter = SafeInterpreter(self.library.runtime_primitives)
         
+        # [TRUE RSI] Meta-Reasoning Failure Analyzer
+        from meta_heuristic import FailureAnalyzer
+        self.failure_analyzer = FailureAnalyzer()
+        
         # Re-register loaded runtime primitives to interpreter
         for name, node in self.library.primitives.items():
             self.library._compile_primitive_runtime(node, self.interpreter)
@@ -963,6 +967,25 @@ class NeuroGeneticSynthesizer:
                     # Early exit on perfect solution? Or keep searching?
                     # Let's return immediate for speed
                     return best_programs
+                else:
+                    # [TRUE RSI] Analyze WHY this candidate failed
+                    if score < 0.5 and io_pairs and hasattr(self, 'failure_analyzer'):
+                        env = {'n': io_pairs[0]['input']}
+                        result = self.interpreter.run(code, env)
+                        analysis = self.failure_analyzer.analyze_failure(code, result, io_pairs[0])
+                        
+                        # Every 100 failures, print reasoning summary and apply adjustments
+                        total_failures = sum(self.failure_analyzer.error_counts.values())
+                        if total_failures > 0 and total_failures % 100 == 0:
+                            self.failure_analyzer.print_reasoning_summary()
+                            adjustments = self.failure_analyzer.get_strategy_adjustments()
+                            if adjustments:
+                                print(f"[Synthesizer] APPLYING META-ADJUSTMENTS: {adjustments}")
+                                # Actually apply: reduce weights for failing ops
+                                for op, node in self.library.primitives.items():
+                                    if f'reduce_weight_{op}' in adjustments:
+                                        node.weight *= adjustments[f'reduce_weight_{op}']
+                        
                 scored_pop.append((code, score))
             
             # Selection & Breeding
