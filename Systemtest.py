@@ -15577,206 +15577,296 @@ class AdversarialTeacher:
         return 1
 
 
-class SelfModifier:
+class DarwinGodelMachine:
     """
-    Darwin Gödel Machine (DGM) Style Self-Modification.
+    Darwin Gödel Machine (DGM) - TRUE Self-Modification
     
-    The system reads its OWN source code, proposes mutations,
-    tests them on benchmarks, and writes back improved versions.
+    Based on jennyzzt/dgm architecture:
+    - Subprocess sandbox for testing modifications
+    - Benchmark-driven selection
+    - Archive of successful versions
+    - Genetic mutation instead of LLM (LLM-free version)
     
-    This is TRUE Recursive Self-Improvement:
-    The code that does the synthesis ITSELF evolves.
+    The system modifies its OWN source code and keeps
+    versions that score better on benchmarks.
     """
     
-    # Target function to evolve (we evolve this specific method)
-    TARGET_METHOD = "_generate_random_program"
     SOURCE_FILE = os.path.abspath(__file__)
-    BACKUP_DIR = "dgm_backups"
+    BACKUP_DIR = "dgm_archive"
+    BENCHMARK_TIMEOUT = 30  # seconds
     
     def __init__(self):
-        self.rng = random.Random()
-        self.current_score = 0.0
+        self.rng = random.Random(int(time.time()))
         self.generation = 0
-        self.mutation_history: List[Dict] = []
+        self.archive: List[Dict] = []  # Successful versions
+        self.current_score = 0.0
         
-        # Ensure backup directory exists
         os.makedirs(self.BACKUP_DIR, exist_ok=True)
+        
+        # Initialize archive with current version
+        self._snapshot_current("initial")
     
-    def read_own_source(self) -> str:
-        """Read the current source code of this file."""
+    def _snapshot_current(self, version_id: str) -> str:
+        """Save current source as a snapshot."""
         with open(self.SOURCE_FILE, 'r', encoding='utf-8') as f:
+            source = f.read()
+        
+        snapshot_path = os.path.join(self.BACKUP_DIR, f"{version_id}.py")
+        with open(snapshot_path, 'w', encoding='utf-8') as f:
+            f.write(source)
+        
+        return snapshot_path
+    
+    def _load_snapshot(self, version_id: str) -> str:
+        """Load a snapshot."""
+        snapshot_path = os.path.join(self.BACKUP_DIR, f"{version_id}.py")
+        with open(snapshot_path, 'r', encoding='utf-8') as f:
             return f.read()
     
-    def extract_method(self, source: str, method_name: str) -> Tuple[str, int, int]:
-        """Extract a method's source code and its line range."""
+    def _apply_source(self, source: str):
+        """Write source back to main file."""
+        with open(self.SOURCE_FILE, 'w', encoding='utf-8') as f:
+            f.write(source)
+    
+    def _extract_function(self, source: str, func_name: str) -> Tuple[str, int, int]:
+        """Extract a function from source by name."""
         lines = source.split('\n')
-        start_line = None
-        end_line = None
-        indent = None
+        start = None
+        end = None
+        base_indent = None
         
         for i, line in enumerate(lines):
-            if f"def {method_name}" in line:
-                start_line = i
-                # Detect indentation
-                indent = len(line) - len(line.lstrip())
-            elif start_line is not None and indent is not None:
-                # Check if we've exited the method (same or lower indent, non-empty)
-                stripped = line.lstrip()
-                if stripped and not stripped.startswith('#'):
+            if f"def {func_name}" in line and start is None:
+                start = i
+                base_indent = len(line) - len(line.lstrip())
+            elif start is not None:
+                stripped = line.strip()
+                if stripped and not stripped.startswith('#') and not stripped.startswith('"""'):
                     current_indent = len(line) - len(line.lstrip())
-                    if current_indent <= indent and not line.strip().startswith('def '):
-                        end_line = i
+                    if current_indent <= base_indent and (stripped.startswith('def ') or stripped.startswith('class ')):
+                        end = i
                         break
         
-        if start_line is None:
+        if start is None:
             return "", -1, -1
-        if end_line is None:
-            end_line = len(lines)
-            
-        method_source = '\n'.join(lines[start_line:end_line])
-        return method_source, start_line, end_line
+        if end is None:
+            end = len(lines)
+        
+        return '\n'.join(lines[start:end]), start, end
     
-    def mutate_method(self, method_source: str) -> str:
+    def _genetic_mutate_function(self, func_source: str) -> str:
         """
-        Genetically mutate the method's source code.
-        This is code-level mutation, not AST-level.
+        Genetically mutate a function's source code.
+        This replaces LLM in original DGM.
+        
+        Mutation operators:
+        1. Change numeric constants
+        2. Change comparison operators
+        3. Add/remove operators
+        4. Change probability values
+        5. Swap statements
         """
-        lines = method_source.split('\n')
-        mutation_type = self.rng.choice([
-            'change_constant',
-            'change_operator',
-            'swap_lines',
-            'duplicate_line',
-            'change_probability'
+        lines = func_source.split('\n')
+        mutation = self.rng.choice([
+            'constant', 'comparison', 'operator', 'probability', 'swap'
         ])
         
-        mutated_lines = lines.copy()
+        mutated = lines.copy()
         
-        if mutation_type == 'change_constant':
-            # Find and change a numeric constant
-            for i, line in enumerate(mutated_lines):
-                if 'randint(' in line:
-                    # Change range
-                    mutated_lines[i] = line.replace('0, 5', f'0, {self.rng.randint(3, 10)}')
+        if mutation == 'constant':
+            # Change a numeric constant
+            for i, line in enumerate(mutated):
+                import re
+                numbers = re.findall(r'\b(\d+)\b', line)
+                if numbers:
+                    old_num = self.rng.choice(numbers)
+                    new_num = str(int(old_num) + self.rng.randint(-3, 3))
+                    mutated[i] = line.replace(old_num, new_num, 1)
                     break
                     
-        elif mutation_type == 'change_operator':
-            # Add or remove an operator from choices
-            for i, line in enumerate(mutated_lines):
-                if "choices = [" in line:
-                    ops = ['+', '-', '*', '/', '%', 'Rec']
-                    selected = self.rng.sample(ops, k=self.rng.randint(3, len(ops)))
-                    mutated_lines[i] = f"        choices = {selected}"
-                    break
-                    
-        elif mutation_type == 'swap_lines':
-            # Swap two adjacent lines (if safe)
-            if len(mutated_lines) > 5:
-                idx = self.rng.randint(2, len(mutated_lines) - 3)
-                mutated_lines[idx], mutated_lines[idx + 1] = mutated_lines[idx + 1], mutated_lines[idx]
+        elif mutation == 'comparison':
+            # Change comparison operator
+            ops = ['<', '>', '<=', '>=', '==', '!=']
+            for i, line in enumerate(mutated):
+                for op in ops:
+                    if op in line:
+                        new_op = self.rng.choice([o for o in ops if o != op])
+                        mutated[i] = line.replace(op, new_op, 1)
+                        break
+                else:
+                    continue
+                break
                 
-        elif mutation_type == 'change_probability':
-            # Change probability thresholds
-            for i, line in enumerate(mutated_lines):
-                if '< 0.3' in line:
-                    new_prob = round(self.rng.uniform(0.1, 0.5), 2)
-                    mutated_lines[i] = line.replace('< 0.3', f'< {new_prob}')
-                    break
-                elif '< 0.5' in line:
-                    new_prob = round(self.rng.uniform(0.3, 0.7), 2)
-                    mutated_lines[i] = line.replace('< 0.5', f'< {new_prob}')
+        elif mutation == 'operator':
+            # Change arithmetic operator
+            ops = ['+', '-', '*']
+            for i, line in enumerate(mutated):
+                for op in ops:
+                    if f" {op} " in line:
+                        new_op = self.rng.choice([o for o in ops if o != op])
+                        mutated[i] = line.replace(f" {op} ", f" {new_op} ", 1)
+                        break
+                else:
+                    continue
+                break
+                
+        elif mutation == 'probability':
+            # Change probability threshold
+            import re
+            for i, line in enumerate(mutated):
+                match = re.search(r'< (0\.\d+)', line)
+                if match:
+                    old_prob = match.group(1)
+                    new_prob = f"{min(0.9, max(0.1, float(old_prob) + self.rng.uniform(-0.2, 0.2))):.2f}"
+                    mutated[i] = line.replace(old_prob, new_prob, 1)
                     break
                     
-        elif mutation_type == 'duplicate_line':
-            # Duplicate a random line
-            if len(mutated_lines) > 3:
-                idx = self.rng.randint(1, len(mutated_lines) - 2)
-                mutated_lines.insert(idx + 1, mutated_lines[idx])
+        elif mutation == 'swap':
+            # Swap two adjacent non-empty lines
+            valid_indices = [i for i, l in enumerate(mutated) 
+                           if l.strip() and not l.strip().startswith('#') 
+                           and i > 1 and i < len(mutated) - 1]
+            if len(valid_indices) >= 2:
+                idx = self.rng.choice(valid_indices[:-1])
+                mutated[idx], mutated[idx + 1] = mutated[idx + 1], mutated[idx]
         
-        return '\n'.join(mutated_lines)
+        return '\n'.join(mutated)
     
-    def apply_mutation(self, source: str, old_method: str, new_method: str) -> str:
-        """Replace old method with new method in source."""
-        return source.replace(old_method, new_method)
-    
-    def backup_current(self):
-        """Create a backup of current source."""
-        source = self.read_own_source()
-        backup_path = os.path.join(self.BACKUP_DIR, f"backup_gen_{self.generation}.py")
-        with open(backup_path, 'w', encoding='utf-8') as f:
-            f.write(source)
-        return backup_path
-    
-    def write_modified_source(self, new_source: str):
-        """Write modified source back to file."""
-        with open(self.SOURCE_FILE, 'w', encoding='utf-8') as f:
-            f.write(new_source)
-    
-    def test_modification(self, test_func: Callable[[], float]) -> float:
+    def _run_benchmark_subprocess(self) -> float:
         """
-        Test the current code modification.
-        Returns a score (higher = better).
+        Run benchmark in subprocess (like Docker in real DGM).
+        Returns score 0.0 to 1.0.
         """
+        import subprocess
+        
+        # Create test script that imports and tests the module
+        test_script = '''
+import sys
+sys.path.insert(0, r"{}")
+try:
+    # Try to import and run a quick synthesis test
+    from Systemtest import HRMSidecar, ToolRegistry
+    tools = ToolRegistry()
+    sidecar = HRMSidecar(tools, quick=True)
+    
+    # Run mini benchmark
+    test_ios = [
+        {{"input": 0, "output": 0}},
+        {{"input": 1, "output": 1}},
+        {{"input": 2, "output": 2}},
+        {{"input": 3, "output": 3}},
+    ]
+    
+    result = sidecar.recursive_synthesize(test_ios, max_size=3)
+    if result:
+        print("SCORE:1.0")
+    else:
+        print("SCORE:0.5")
+except Exception as e:
+    print(f"SCORE:0.0:{{e}}")
+'''.format(os.path.dirname(self.SOURCE_FILE).replace('\\', '\\\\'))
+        
         try:
-            return test_func()
+            result = subprocess.run(
+                [sys.executable, '-c', test_script],
+                capture_output=True,
+                text=True,
+                timeout=self.BENCHMARK_TIMEOUT,
+                cwd=os.path.dirname(self.SOURCE_FILE)
+            )
+            
+            output = result.stdout + result.stderr
+            for line in output.split('\n'):
+                if line.startswith('SCORE:'):
+                    score_str = line.split(':')[1]
+                    return float(score_str)
+            
+            return 0.0
+        except subprocess.TimeoutExpired:
+            return 0.0
         except Exception as e:
-            print(f"[DGM] Modification test failed: {e}")
-            return -1.0
+            print(f"[DGM] Benchmark error: {e}")
+            return 0.0
     
-    def evolve_step(self, test_func: Callable[[], float]) -> bool:
+    def evolve_step(self, target_function: str = "_generate_random_program") -> bool:
         """
-        One step of Darwin Gödel Machine evolution:
-        1. Read own source
-        2. Extract target method
-        3. Mutate it
-        4. Write back
-        5. Test
-        6. Keep if better, revert if worse
+        One step of DGM evolution:
+        1. Snapshot current version
+        2. Extract target function
+        3. Mutate it genetically
+        4. Apply mutation
+        5. Run benchmark in subprocess
+        6. If better, keep in archive; else revert
         """
         print(f"\n[DGM] === Generation {self.generation} ===")
         
-        # 1. Backup
-        backup_path = self.backup_current()
+        # 1. Snapshot
+        version_id = f"gen_{self.generation}"
+        backup_path = self._snapshot_current(version_id)
+        print(f"[DGM] Snapshot saved: {version_id}")
         
         # 2. Read and extract
-        source = self.read_own_source()
-        method_source, start, end = self.extract_method(source, self.TARGET_METHOD)
+        source = self._load_snapshot(version_id)
+        func_source, start, end = self._extract_function(source, target_function)
         
-        if not method_source:
-            print(f"[DGM] Could not find method: {self.TARGET_METHOD}")
+        if not func_source:
+            print(f"[DGM] Could not find function: {target_function}")
             return False
         
         # 3. Mutate
-        mutated_method = self.mutate_method(method_source)
-        new_source = self.apply_mutation(source, method_source, mutated_method)
+        mutated_func = self._genetic_mutate_function(func_source)
         
-        # 4. Write
-        self.write_modified_source(new_source)
-        print(f"[DGM] Applied mutation to {self.TARGET_METHOD}")
+        # 4. Apply
+        lines = source.split('\n')
+        new_lines = lines[:start] + mutated_func.split('\n') + lines[end:]
+        new_source = '\n'.join(new_lines)
         
-        # 5. Test (need to reload module - tricky in Python)
-        # For safety, we test by running a subprocess or just trust the next run
-        new_score = self.test_modification(test_func)
+        self._apply_source(new_source)
+        print(f"[DGM] Applied genetic mutation to {target_function}")
         
-        # 6. Compare
+        # 5. Benchmark in subprocess
+        print(f"[DGM] Running benchmark in subprocess...")
+        new_score = self._run_benchmark_subprocess()
+        print(f"[DGM] Benchmark score: {new_score:.4f}")
+        
+        # 6. Compare and decide
         if new_score > self.current_score:
             print(f"[DGM] ✅ IMPROVEMENT! {self.current_score:.4f} → {new_score:.4f}")
             self.current_score = new_score
-            self.mutation_history.append({
+            self.archive.append({
                 'generation': self.generation,
+                'version_id': version_id,
                 'score': new_score,
-                'mutation': mutated_method[:100] + "..."
+                'function': target_function
             })
+            self._snapshot_current(f"improved_{self.generation}")
             self.generation += 1
             return True
         else:
             # Revert
             print(f"[DGM] ❌ No improvement ({new_score:.4f} <= {self.current_score:.4f}). Reverting.")
-            with open(backup_path, 'r', encoding='utf-8') as f:
-                original = f.read()
-            self.write_modified_source(original)
+            original = self._load_snapshot(version_id)
+            self._apply_source(original)
             self.generation += 1
             return False
+    
+    def run_evolution(self, num_generations: int = 10, target_function: str = "_generate_random_program"):
+        """Run multiple evolution steps."""
+        print(f"\n[DGM] Starting Darwin Gödel Machine Evolution")
+        print(f"[DGM] Target: {target_function}")
+        print(f"[DGM] Generations: {num_generations}")
+        
+        improvements = 0
+        for _ in range(num_generations):
+            if self.evolve_step(target_function):
+                improvements += 1
+        
+        print(f"\n[DGM] Evolution complete!")
+        print(f"[DGM] Total improvements: {improvements}/{num_generations}")
+        print(f"[DGM] Final score: {self.current_score:.4f}")
+        print(f"[DGM] Archive size: {len(self.archive)}")
+        
+        return improvements
 
 
 class HRMSidecar:
