@@ -439,5 +439,12 @@
     "usage": 1,
     "weight": 5.0,
     "hash": "a280c02c707e86f2a640da4da76a685f528c3b2cd3c34ad7d7c55dcf654b8e8e"
+  },
+  "concept_123": {
+    "code": "abs_val(prod_list(n))",
+    "level": 1,
+    "usage": 1,
+    "weight": 5.0,
+    "hash": "54e029291a0663a971771fd8f76b1807c7a8fc12085503059b6a25c787416878"
   }
 }

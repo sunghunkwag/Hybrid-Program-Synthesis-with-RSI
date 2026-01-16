@@ -487,6 +487,11 @@ class LibraryManager:
         2. Valid DAG (no circular deps, level check)
         3. Regression Validation (HotSwap Pattern)
         """
+        # [RSI-Fix] Semantic De-Bloating (No Fake Complexity)
+        if self._is_bloated(code):
+            print(f"[Library] Rejecting {name}: Detected syntactic bloat (e.g. reverse(reverse(...)))")
+            return False
+            
         # 1. Parse & Hash
         s_hash = self.hasher.hash_code(code)
         
@@ -608,6 +613,32 @@ class LibraryManager:
         weights = [self.primitives[op].weight for op in ops]
         return ops, weights
         
+    def _is_bloated(self, code: str) -> bool:
+        """
+        Detects common tautologies/bloat that inflate complexity without value.
+        True if code can be trivially simplified.
+        """
+        original = code
+        simpler = code
+        
+        # Iterative reduction
+        prev = ""
+        while simpler != prev:
+            prev = simpler
+            simpler = simpler.replace("reverse(reverse(", "")
+            simpler = simpler.replace("not_op(not_op(", "")
+            simpler = simpler.replace("neg(neg(", "")
+            simpler = simpler.replace("add(n, 0)", "n")
+            simpler = simpler.replace("mul(n, 1)", "n")
+            simpler = simpler.replace("sub(n, 0)", "n")
+            
+            if simpler.endswith("))"):
+                 simpler = simpler.replace("))", ")") 
+        
+        if len(simpler) < len(original) * 0.8:
+             return True
+        return False
+
     def feedback(self, used_ops: List[str], success: bool):
         """Update weights based on success/failure."""
         for op in used_ops:

@@ -12,6 +12,18 @@ Executes all generated code in a separate process/sandbox (The "Watchdog").
 - **Strict Monitoring**: Enforces hard timeouts (default 2.0s) and resource limits.
 - **Unrestricted Learning**: Allows full python `exec()` within the box, enabling the AI to learn real coding without risking the host.
 
+### RSI Features
+
+### 3. Genuine RSI (Type A: Meta-Heuristic)
+Unlike "Fake RSI" that relies on hardcoded prompts or LLM calls, this system implements **True Recursive Self-Improvement**:
+*   **Meta-Heuristic Search:** The system maintains a persistent set of feature weights (`rsi_meta_weights.json`) that evolves via reinforcement learning. It learns *how to search* effectively.
+*   **Semantic De-Bloating:** To prevent "Complexity Bloat" (a common cheat in genetic programming), the `LibraryManager` rigorously validates new concepts. Tautologies like `reverse(reverse(n))` are rejected. Only semantically novel concepts are registered.
+
+### 4. Verified Honesty
+*   **No LLM APIs:** Zero dependency on OpenAI/Anthropic/Google APIs.
+*   **No Hardcoding:** Solution paths are discovered, not programmed.
+*   **Transparent Persistence:** Learned knowledge is saved in JSON, audit-ready.
+
 ### 2. Safe Interpreter
 AST-based interpreter for DSL execution.
 - Prevents usage of `eval` or `exec` within the synthesis loop.
