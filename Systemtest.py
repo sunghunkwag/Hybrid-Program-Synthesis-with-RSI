@@ -38,12 +38,13 @@ except ImportError:
     np = None
 
 try:
-    from neuro_genetic_synthesizer import NeuroGeneticSynthesizer, NeuroInterpreter, HybridSynthesizer
+    from neuro_genetic_synthesizer import NeuroGeneticSynthesizer, SafeInterpreter, LibraryManager
     HAS_HYBRID_SYNTH = True
-except ImportError:
+except ImportError as e:
+    print(f"[Systemtest] Import Warning: {e}")
     NeuroGeneticSynthesizer = None
-    NeuroInterpreter = None
-    HybridSynthesizer = None
+    SafeInterpreter = None
+    LibraryManager = None
     HAS_HYBRID_SYNTH = False
     print("[Systemtest] Warning: NeuroGeneticSynthesizer module not found. Skipping RSI features.")
 
@@ -3908,8 +3909,9 @@ class InventionSelfModifier:
                 json.dump(state, f, indent=2)
             print(f"[RSI-Persist] State saved to {path} ({len(state['library'])} library items)")
             
-            # [TRUE RSI] Also inject learned operators to source code
-            self.inject_learned_operators_to_source()
+            # [SAFE RSI] Source injection removed for security
+            # Library is now persisted via JSON registry only (Pillar 5)
+            # self.inject_learned_operators_to_source()
             
         except Exception as e:
             print(f"[RSI-Persist] Failed to save state: {e}")
