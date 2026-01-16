@@ -15554,7 +15554,7 @@ class AdversarialTeacher:
             else:
                 return BSVar('n')
         
-        # Non-terminals - ALL choices are equally weighted, no bias
+        # Non-terminals * ALL choices are equally weighted, no bias
         # Rec takes ANY subexpression, not hardcoded patterns
         choices = ['+', '-', '*', 'Rec']
         choice = self.rng.choice(choices)
@@ -16819,8 +16819,28 @@ def orchestrator_main():
                             {"code": code, "origin": "real_synthesis"},
                             tags=["code_snippet", "discovered", "success"],
                         )
+                    
+                    # [DGM] Increment Teacher level on success
+                    hrm_sidecar.adversarial_level = min(hrm_sidecar.adversarial_level + 1, 10)
                 else:
                     print(f"[HRM-Sidecar] No concepts discovered (synthesis failed)")
+                    
+                    # [DGM] DARWIN GÖDEL MACHINE - Evolve synthesizer when failing
+                    if i % 5 == 0 and i > 0:
+                        print(f"\n[DGM] 🧬 SYNTHESIS FAILED - Triggering self-modification!")
+                        dgm = DarwinGodelMachine()
+                        
+                        # Real benchmark: try to solve the CURRENT failing task
+                        def dgm_benchmark():
+                            try:
+                                test_sidecar = HRMSidecar(tools, quick=True)
+                                result = test_sidecar.recursive_synthesize(io_examples, max_size=5)
+                                return 1.0 if result else 0.0
+                            except:
+                                return 0.0
+                        
+                        dgm.evolve_step("_generate_random_program")
+                        print(f"[DGM] Archive size: {len(dgm.archive)}")
                     
                     # [ConceptTransfer] Trigger meta-pattern discovery on stagnation
                     if hrm_sidecar.transfer_engine:
