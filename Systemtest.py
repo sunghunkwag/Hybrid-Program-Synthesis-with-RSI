@@ -15477,6 +15477,105 @@ class BottomUpSynthesizer:
         return f"def f(n):\n    if n <= {k}: {base_stmt}\n    return {expr}"
 
 
+
+class AdversarialTeacher:
+    """
+    The 'Teacher' in the Adversarial RSI loop.
+    Generates algorithmic challenges (programs) for the Student to solve.
+    Drives curriculum learning by increasing complexity.
+    """
+    def __init__(self, interpreter: SafeInterpreter):
+        self.interpreter = interpreter
+        self.rng = random.Random()
+    
+    def generate_challenge(self, difficulty_level: int) -> Optional[Dict[str, Any]]:
+        """
+        Generate a challenge program and its I/O pairs.
+        Difficulty determines AST depth/complexity.
+        """
+        max_attempts = 50
+        # Difficulty maps to max depth roughly
+        depth = min(2 + difficulty_level // 2, 6) 
+        
+        for _ in range(max_attempts):
+            # 1. Generate Random Program
+            program = self._generate_random_program(depth)
+            
+            # 2. Generate I/O Pairs
+            io_pairs = []
+            valid_program = True
+            
+            # Use small inputs for verification
+            test_inputs = list(range(6)) # 0 to 5
+            
+            try:
+                for n in test_inputs:
+                    # Execute program to get 'ground truth' output
+                    # Teacher uses run_recursive check to see if it terminates/works
+                    res = self.interpreter.run_recursive(program, n, 0, 0) # Default base case for generation
+                    
+                    if res is None:
+                        valid_program = False
+                        break
+                    if abs(res) > 10000: # Ignore Exploding values
+                        valid_program = False
+                        break
+                        
+                    io_pairs.append({'input': n, 'output': res})
+            except:
+                valid_program = False
+            
+            if not valid_program:
+                continue
+                
+            # 3. Filter Trivial Programs
+            outputs = [p['output'] for p in io_pairs]
+            if all(o == 0 for o in outputs): continue # All zero
+            if all(o == i for i, o in enumerate(outputs)): continue # Identity
+            if all(o == outputs[0] for o in outputs): continue # Constant
+            
+            # 4. Success! Return Challenge
+            return {
+                'program': program,
+                'code_str': str(program),
+                'io_pairs': io_pairs,
+                'difficulty': difficulty_level,
+                'complexity': self.evaluate_complexity(program)
+            }
+            
+        return None
+
+    def _generate_random_program(self, depth: int) -> BSExpr:
+        """Generate random BSExpr (Teacher's creative process)."""
+        if depth <= 0 or self.rng.random() < 0.3:
+            # Terminals
+            if self.rng.random() < 0.5:
+                return BSVal(self.rng.randint(0, 5))
+            else:
+                return BSVar('n')
+        
+        # Non-terminals
+        ops = ['+', '-', '*']
+        # Add recursion with probability based on depth (Teacher likes tricky recursion)
+        if self.rng.random() < 0.4:
+            # Recursive call: Rec(n-k)
+            k = self.rng.randint(1, 3)
+            return BSRecCall(BSBinOp('-', BSVar('n'), BSVal(k)))
+        
+        op = self.rng.choice(ops)
+        left = self._generate_random_program(depth - 1)
+        right = self._generate_random_program(depth - 1)
+        return BSBinOp(op, left, right)
+
+    def evaluate_complexity(self, program: BSExpr) -> int:
+        """Score the complexity of a program (AST size)."""
+        if isinstance(program, BSBinOp):
+            return 1 + self.evaluate_complexity(program.left) + self.evaluate_complexity(program.right)
+        if isinstance(program, BSRecCall):
+            return 2 + self.evaluate_complexity(program.arg) # Recursion is more complex
+        return 1
+
+
 class HRMSidecar:
     def __init__(self, tools_registry: ToolRegistry, quick: bool = False, guided: bool = False):
         self.tools = tools_registry
@@ -15492,6 +15591,10 @@ class HRMSidecar:
         
         # Recursive Synthesizer for fibonacci, factorial, sum_to_n
         self.recursive_interpreter = SafeInterpreter(limit=10000)
+        
+        # [NEW] Adversarial Teacher (Challenge Generator)
+        self.teacher = AdversarialTeacher(self.recursive_interpreter)
+        self.adversarial_level = 1
         
         # Bezalel Engine Integration (Universal Resonance)
         self.bezalel = BezalelSynthesizer()
@@ -15645,6 +15748,18 @@ class HRMSidecar:
         
         return True
     
+    def generate_adversarial_challenge(self) -> Optional[Dict[str, Any]]:
+        """
+        Produce a new challenge from the Adversarial Teacher.
+        The system will try to solve this generated problem.
+        """
+        challenge = self.teacher.generate_challenge(self.adversarial_level)
+        if challenge:
+            print(f"\n[Adversarial RSI] ⚔️ New Challenge Generated! Level: {self.adversarial_level}")
+            print(f"  > Target Complexity: {challenge['complexity']}")
+            print(f"  > I/O Examples: {challenge['io_pairs'][:3]}...")
+            return challenge
+        return None
     def _generate_recursive_program(self, rng: random.Random, depth: int) -> BSExpr:
         """Generate random BSExpr with BSRecCall for recursive programs."""
         if depth <= 0 or rng.random() < 0.25:
@@ -16408,6 +16523,16 @@ def orchestrator_main():
                      print(f"[HRM-Sidecar] Task generation failed. Skipping.")
                 else:
                     print(f"[HRM-Sidecar] Attempting REAL synthesis on [{task_name}] with {len(io_examples)} examples...")
+                    
+                    # [ADVERSARIAL RSI]
+                    # Occasionally inject a pure Teacher challenge instead of domain tasks
+                    if i % 3 == 0:
+                        adv_challenge = hrm_sidecar.generate_adversarial_challenge()
+                        if adv_challenge:
+                            print(f"[RSI-Adversarial] ⚔️ Overriding task with TEACHER CHALLENGE (Level {hrm_sidecar.adversarial_level})")
+                            io_examples = adv_challenge['io_pairs']
+                            task_name = f"adversarial_lvl_{hrm_sidecar.adversarial_level}"
+
                     concepts = hrm_sidecar.dream(
                         experiences_as_code=[],
                         io_examples=io_examples,
