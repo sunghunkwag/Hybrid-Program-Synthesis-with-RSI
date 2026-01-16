@@ -123,3 +123,29 @@ class MetaHeuristic:
         # For simple version, we just save.
         self._save_weights()
         print(f"[RSI-Meta] 🧠 Updated Search Heuristics: {self.weights}")
+
+    def learn_failure(self, failed_program: Any):
+        """
+        [TRUE RSI] Update weights based on FAILURE.
+        Reinforcement Learning: Failed solution = Negative Reward.
+        
+        This teaches the system to AVOID patterns that don't work,
+        not just to prefer patterns that do work. This is critical for
+        genuine recursive self-improvement.
+        """
+        features = self._extract_features(failed_program)
+        lr = self.weights.get('learning_rate', 0.1) * 0.1  # Smaller learning rate for failures
+        
+        # Decrease weights for features in failed programs
+        for feat, count in features.items():
+            if count > 0 and feat in self.weights and feat != 'learning_rate':
+                # Gradient descent-ish (negative feedback)
+                self.weights[feat] = max(0.01, self.weights[feat] - lr * count)
+        
+        # Increase depth_penalty if failed program was deep
+        if features.get('size', 0) > 5:
+            self.weights['depth_penalty'] = min(1.0, self.weights.get('depth_penalty', 0.1) + lr)
+        
+        # Don't save on every failure (too expensive), just update in memory
+        # Save periodically in the main loop instead
+

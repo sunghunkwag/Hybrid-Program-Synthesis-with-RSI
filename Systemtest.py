@@ -15868,10 +15868,16 @@ class HRMSidecar:
                     code_str = str(program)
                     print(f"  > [RSI-Meta] SUCCESS (score={score:.2f})! Found: {code_str}")
                     
-                    # [RSI FEEDBACK LOOP] Update heuristic weights
+                    # [RSI FEEDBACK LOOP] Update heuristic weights (positive)
                     self.meta_heuristic.learn(program)
                     
                     return (code_str, program)
+                else:
+                    # [TRUE RSI] Learn from FAILURE too (negative feedback)
+                    self.meta_heuristic.learn_failure(program)
+        
+        # [TRUE RSI] Log failure analysis for meta-level reasoning
+        print(f"  > [RSI-Meta] FAILURE: Tested {sum(len(self._enumerate_expressions(s)) for s in range(1, max_size + 1))} programs, none passed.")
         
         return None
 
