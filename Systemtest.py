@@ -15641,19 +15641,15 @@ class HRMSidecar:
         if not all(isinstance(p.get('input'), (int, float)) for p in io_pairs):
             return None
         
-        # Detect Fibonacci pattern for dual base case
-        is_fibonacci_pattern = self._detect_fibonacci_pattern(io_pairs)
-        
+        # NO PATTERN DETECTION - Pure unbiased enumeration
         print(f"  > [RecursiveSynthesizer] Bottom-up enumeration (max_size={max_size})...")
-        if is_fibonacci_pattern:
-            print(f"  > [RecursiveSynthesizer] Detected FIBONACCI pattern! Using dual base case.")
         
         # BOTTOM-UP ENUMERATION
         # Generate all expressions by size and test each
         for size in range(1, max_size + 1):
             expressions = self._enumerate_expressions(size)
             for program in expressions:
-                if self._test_program(program, io_pairs, is_fibonacci_pattern):
+                if self._test_program(program, io_pairs):
                     code_str = str(program)
                     print(f"  > [RecursiveSynthesizer] SUCCESS (size={size})! Found: {code_str}")
                     return (code_str, program)
@@ -15701,46 +15697,24 @@ class HRMSidecar:
         
         return result
 
-    def _detect_fibonacci_pattern(self, io_pairs: List[Dict[str, Any]]) -> bool:
-        """Detect if I/O pairs match a Fibonacci-like pattern (dual base case)."""
-        # Need at least f(0) and f(1) in examples
-        io_dict = {int(p['input']): p['output'] for p in io_pairs}
-        
-        if 0 not in io_dict or 1 not in io_dict:
-            return False
-        
-        # Check if higher values follow f(n) = f(n-1) + f(n-2)
-        for n in io_dict:
-            if n >= 2:
-                if n-1 in io_dict and n-2 in io_dict:
-                    expected = io_dict[n-1] + io_dict[n-2]
-                    if io_dict[n] == expected:
-                        return True
-        return False
+    # DELETED: _detect_fibonacci_pattern - No pattern-specific detection
 
-    def _test_program(self, program: BSExpr, io_pairs: List[Dict[str, Any]], use_fib: bool) -> bool:
-        """Test a program against all I/O pairs."""
-        io_dict = {int(p['input']): p['output'] for p in io_pairs}
-        v0 = io_dict.get(0, 0)
-        v1 = io_dict.get(1, 1)
-        
+    def _test_program(self, program: BSExpr, io_pairs: List[Dict[str, Any]]) -> bool:
+        """Test a program against all I/O pairs. No special cases."""
         for pair in io_pairs:
             n = int(pair['input'])
             expected = pair['output']
             
             try:
-                if use_fib:
-                    result = self.recursive_interpreter.run_recursive_fib(program, n, v0, v1)
-                else:
-                    # Try multiple single base cases
-                    result = None
-                    for base_k, base_v in [(0, 0), (0, 1), (1, 1), (1, 0)]:
-                        try:
-                            result = self.recursive_interpreter.run_recursive(program, n, base_k, base_v)
-                            if result == expected:
-                                break
-                        except:
-                            continue
+                # Try multiple base cases - no special fibonacci handling
+                result = None
+                for base_k, base_v in [(0, 0), (0, 1), (1, 1), (1, 0), (2, 0), (2, 1)]:
+                    try:
+                        result = self.recursive_interpreter.run_recursive(program, n, base_k, base_v)
+                        if result == expected:
+                            break
+                    except:
+                        continue
                 
                 if result != expected:
                     return False
