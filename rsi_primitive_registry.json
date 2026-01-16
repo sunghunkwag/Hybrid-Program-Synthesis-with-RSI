@@ -268,8 +268,8 @@
   "concept_50": {
     "code": "not_op(concept_45(concept_29(concept_48(n, n), n), n))",
     "level": 5,
-    "usage": 3,
-    "weight": 6.050000000000001,
+    "usage": 4,
+    "weight": 6.655000000000001,
     "hash": "0c0ec63d8a52f180b1faef9bb222b74c512eb43759a1a74882282c465bef06c9"
   },
   "concept_51": {
@@ -418,5 +418,19 @@
     "usage": 1,
     "weight": 5.0,
     "hash": "95b518195f27f1272fddc703c95326232842fa9d330bf484420907afec9ab689"
+  },
+  "concept_116": {
+    "code": "not_op(concept_50(n, reverse(reverse(n))))",
+    "level": 6,
+    "usage": 1,
+    "weight": 5.0,
+    "hash": "fec82aa43e6e53aa5bedcdaf178d9f2903c01324dd972e292273bcf199690653"
+  },
+  "concept_121": {
+    "code": "map_double(add(n, n))",
+    "level": 1,
+    "usage": 1,
+    "weight": 5.0,
+    "hash": "a0e83e30d7799e8abaa5d341e02300fb335984b6c54495e1550835a3c00ea3cf"
   }
 }
