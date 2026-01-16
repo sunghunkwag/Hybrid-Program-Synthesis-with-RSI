@@ -368,6 +368,13 @@ class LibraryManager:
             'max_list': (lambda lst: max(lst[:100]) if isinstance(lst, list) and len(lst) > 0 else None, 0),
             'count_list': (lambda lst: len(lst) if isinstance(lst, list) else 0, 0),
             
+            # --- Matrix (2D List) Operations ---
+            'flatten': (lambda m: self._safe_flatten(m), 0),
+            'matrix_sum': (lambda m: self._safe_matrix_sum(m), 0),
+            'row_sums': (lambda m: [sum(row[:100]) for row in m[:100]] if self._is_matrix(m) else [], 0),
+            'col_sums': (lambda m: self._safe_col_sums(m), 0),
+            'matrix_shape': (lambda m: (len(m), len(m[0]) if m and isinstance(m[0], list) else 0) if isinstance(m, list) else (0, 0), 0),
+            
             # --- Sorting (Built-in, bounded) ---
             'sort_asc': (lambda lst: sorted(lst[:100]) if isinstance(lst, list) else lst, 0),
             'sort_desc': (lambda lst: sorted(lst[:100], reverse=True) if isinstance(lst, list) else lst, 0),
@@ -444,6 +451,47 @@ class LibraryManager:
         result.extend(a[i:])
         result.extend(b[j:])
         return result
+
+    def _is_matrix(self, m) -> bool:
+        """Check if input is a 2D list (list of lists)."""
+        if not isinstance(m, list) or len(m) == 0:
+            return False
+        return all(isinstance(row, list) for row in m)
+
+    def _safe_flatten(self, m) -> list:
+        """Flatten a 2D list into a 1D list. Bounded."""
+        if not self._is_matrix(m):
+            return m if isinstance(m, list) else []
+        result = []
+        for row in m[:100]:  # Outer bound
+            for elem in row[:100]:  # Inner bound
+                result.append(elem)
+                if len(result) >= 10000:  # Hard limit
+                    return result
+        return result
+
+    def _safe_matrix_sum(self, m) -> int:
+        """Sum all elements of a 2D list."""
+        if not self._is_matrix(m):
+            return 0
+        total = 0
+        for row in m[:100]:
+            for elem in row[:100]:
+                if isinstance(elem, (int, float)):
+                    total += elem
+        return total
+
+    def _safe_col_sums(self, m) -> list:
+        """Return sum of each column in a 2D list."""
+        if not self._is_matrix(m) or len(m) == 0:
+            return []
+        num_cols = len(m[0]) if m[0] else 0
+        sums = [0] * min(num_cols, 100)  # Bound columns
+        for row in m[:100]:
+            for i, val in enumerate(row[:100]):
+                if i < len(sums) and isinstance(val, (int, float)):
+                    sums[i] += val
+        return sums
 
     def _safe_recurse(self, func_name: str, arg, depth: int = 0, max_depth: int = 50):
         """
@@ -702,6 +750,12 @@ class NeuroGeneticSynthesizer:
         """Delegate feedback to the library manager."""
         self.library.feedback(used_ops, success)
 
+    def _is_2d_list(self, x) -> bool:
+        """Check if input is a 2D list (list of lists)."""
+        if not isinstance(x, list) or len(x) == 0:
+            return False
+        return all(isinstance(row, list) for row in x)
+
     def synthesize(self, io_pairs: List[Dict], timeout: Optional[float] = 2.0, **kwargs) -> List[Tuple[str, Any, int, int]]:
         """
         Attempts to find a program that satisfies the IO pairs.
@@ -730,17 +784,26 @@ class NeuroGeneticSynthesizer:
                     'map_fn', 'filter_fn', 'fold', 'sort' 
                 })
 
-            # Case 2: List -> Int (Aggregation task)
-            elif isinstance(inp, list) and isinstance(outp, int):
+            # Case 2: 1D List -> Int (Aggregation task)
+            elif isinstance(inp, list) and not self._is_2d_list(inp) and isinstance(outp, int):
                 # We need List->Int ops (len, sum, max), but MUST BAN List->List ops
-                # because they return the wrong type (List instead of Int).
                 banned_ops.update({
                     'reverse', 'split_half', 'init', 'tail', 'cons', 'snoc', 'append',
-                    'map_fn', 'filter_fn', 'sort', 'range_list'
+                    'map_fn', 'filter_fn', 'sort', 'range_list',
+                    # Also ban matrix ops on 1D lists
+                    'matrix_sum', 'row_sums', 'col_sums', 'flatten', 'matrix_shape'
                 })
-                # Note: 'fold' returns T, so it might be valid if it returns Int. Keep safe for now?
-                # Actually fold is the ultimate reducer. Let's KEEP fold, first, last (elements could be int).
-                # Banning explicitly list-returning ops.
+
+            # Case 3: 2D List (Matrix) -> Int (Matrix aggregation task)
+            elif isinstance(inp, list) and self._is_2d_list(inp) and isinstance(outp, int):
+                # Ban 1D list operators that will TypeError on 2D lists
+                banned_ops.update({
+                    'sum_list', 'prod_list', 'min_list', 'max_list',  # These fail on nested lists
+                    'reverse', 'split_half', 'init', 'tail', 'cons', 'snoc', 'append',
+                    'map_fn', 'filter_fn', 'sort_asc', 'sort_desc', 'range_list',
+                    'first', 'last'  # Returns a list, not an int
+                })
+                # KEEP: matrix_sum, flatten (to reduce to 1D then sum), row_sums, col_sums
             
             if banned_ops:
                 filtered_ops = []
