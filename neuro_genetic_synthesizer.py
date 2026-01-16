@@ -359,6 +359,12 @@ class LibraryManager:
             # --- Merge Sort Building Blocks ---
             'split_half': (lambda lst: (lst[:len(lst)//2], lst[len(lst)//2:]) if isinstance(lst, list) else ([], []), 0),
             'merge_sorted': (lambda a, b: self._merge_sorted(a, b), 0),
+            
+            # --- Higher-Order Functions (Genuine Functional Primitives) ---
+            'map_fn': (lambda fn_name, lst: self._safe_map(fn_name, lst), 0),
+            'filter_fn': (lambda fn_name, lst: self._safe_filter(fn_name, lst), 0),
+            'fold_fn': (lambda fn_name, init, lst: self._safe_fold(fn_name, init, lst), 0),
+            'recurse_fn': (lambda fn_name, arg: self._safe_recurse(fn_name, arg), 0),
         }
         
         self.runtime_primitives = {}  # Callable map for Interpreter
@@ -415,6 +421,63 @@ class LibraryManager:
         result.extend(a[i:])
         result.extend(b[j:])
         return result
+
+    def _safe_recurse(self, func_name: str, arg, depth: int = 0, max_depth: int = 50):
+        """
+        Bounded recursion with depth limit (Y-combinator pattern).
+        Applies a function recursively with a callback for self-reference.
+        """
+        if depth >= max_depth:
+            return arg  # Base case fallback
+        if func_name not in self.runtime_primitives:
+            return arg
+        fn = self.runtime_primitives[func_name]
+        try:
+            # The function should accept (arg, recurse_callback)
+            result = fn(arg, lambda x: self._safe_recurse(func_name, x, depth + 1, max_depth))
+            return result
+        except TypeError:
+            # If function doesn't accept callback, just apply once
+            return fn(arg)
+
+    def _safe_map(self, func_name: str, lst: list) -> list:
+        """Apply a primitive to each element, max 100 iterations."""
+        if not isinstance(lst, list) or len(lst) > 100:
+            return lst[:100] if isinstance(lst, list) else []
+        if func_name not in self.runtime_primitives:
+            return lst
+        fn = self.runtime_primitives[func_name]
+        try:
+            return [fn(x) for x in lst[:100]]
+        except:
+            return lst
+
+    def _safe_filter(self, func_name: str, lst: list) -> list:
+        """Filter list by predicate primitive, max 100 iterations."""
+        if not isinstance(lst, list) or len(lst) > 100:
+            return lst[:100] if isinstance(lst, list) else []
+        if func_name not in self.runtime_primitives:
+            return lst
+        fn = self.runtime_primitives[func_name]
+        try:
+            return [x for x in lst[:100] if fn(x)]
+        except:
+            return lst
+
+    def _safe_fold(self, func_name: str, init, lst: list):
+        """Left fold with max 100 iterations."""
+        if not isinstance(lst, list) or len(lst) > 100:
+            return init
+        if func_name not in self.runtime_primitives:
+            return init
+        fn = self.runtime_primitives[func_name]
+        acc = init
+        try:
+            for x in lst[:100]:
+                acc = fn(acc, x)
+            return acc
+        except:
+            return init
 
     def register_new_primitive(self, name: str, code: str, interpreter: SafeInterpreter, validation_ios: List[Dict] = None) -> bool:
         """
