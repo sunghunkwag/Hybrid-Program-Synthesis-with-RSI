@@ -896,7 +896,8 @@ class NeuroGeneticSynthesizer:
                 parent1 = random.choice(top_50)[0]
                 parent2 = random.choice(top_50)[0]
                 child = self._crossover(parent1, parent2)
-                child = self._mutate(child, ops, weights)
+                # [FIX] Pass scalar_goal to mutate to maintain scalar root constraint
+                child = self._mutate(child, ops, weights, scalar_goal=scalar_goal)
                 next_pop.append(child)
             
             population = next_pop
@@ -1068,10 +1069,30 @@ class NeuroGeneticSynthesizer:
             # Fallback on any parse/transform error
             return p1
 
-    def _mutate(self, code: str, ops, weights) -> str:
+    def _mutate(self, code: str, ops, weights, scalar_goal=False) -> str:
+        # [FIX] Filter ops for scalar_goal if needed
+        valid_ops = ops
+        valid_weights = weights
+        
+        if scalar_goal:
+            # Only allow scalar-returning operators at the root
+            scalar_ops = {
+                'len', 'sum_list', 'prod_list', 'min_list', 'max_list', 'count_list',
+                'matrix_sum', 'index_of', 'add', 'sub', 'mul', 'div', 'mod', 'abs_val', 'neg'
+            }
+            filtered = []
+            f_weights = []
+            for op, w in zip(ops, weights):
+                if op in scalar_ops:
+                    filtered.append(op)
+                    f_weights.append(w)
+            if filtered:
+                valid_ops = filtered
+                valid_weights = f_weights
+
         if random.random() < 0.5:
             # Change Operator
-            new_op = random.choices(ops, weights=weights, k=1)[0]
+            new_op = random.choices(valid_ops, weights=valid_weights, k=1)[0]
             if '(' in code:
                 args = code.split('(', 1)[1]
                 return f"{new_op}({args}"
@@ -1079,7 +1100,7 @@ class NeuroGeneticSynthesizer:
                 return f"{new_op}({code})"
         else:
             # Wrap in new operator
-            new_op = random.choices(ops, weights=weights, k=1)[0]
+            new_op = random.choices(valid_ops, weights=valid_weights, k=1)[0]
             return f"{new_op}({code})"
 
     def _record_success(self, code: str, io_pairs: List[Dict]):
