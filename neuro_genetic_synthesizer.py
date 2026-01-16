@@ -247,6 +247,31 @@ class PrimitiveValidator:
             return True # No tests provided, soft accept (or reject depending on strictness)
             
         print(f"[Validator] Running regression suite for {name} ({len(validation_ios)} tests)...")
+        
+        # [PRESCRIPTION B] Enforce Strict Concept IDs
+        # If name implies a type (e.g. concept_5_int_to_int), reject mismatched IOs immediately.
+        if "_to_" in name:
+            for io in validation_ios:
+                inp = io['input']
+                # Detect IO based signature
+                sig_parts = name.split("_")
+                try:
+                    # e.g. concept_5_int_to_int -> expected="int_to_int"
+                    expected_sig = "_".join(sig_parts[-3:]) # "int_to_int"
+                except:
+                    continue
+                    
+                # Very basic check: just ensuring we don't mix scalars and lists if labeled
+                if "int_to" in expected_sig and isinstance(inp, list):
+                     print(f"  [Validator] FAIL:SignatureMismatch (Labeled {expected_sig} but got List input)")
+                     return False
+                if "list_to" in expected_sig and isinstance(inp, int):
+                     print(f"  [Validator] FAIL:SignatureMismatch (Labeled {expected_sig} but got Int input)")
+                     return False
+                if "matrix_to" in expected_sig and not (isinstance(inp, list) and inp and isinstance(inp[0], list)):
+                     print(f"  [Validator] FAIL:SignatureMismatch (Labeled {expected_sig} but got non-Matrix input)")
+                     return False
+
         passes = 0
         for io in validation_ios:
             # Prepare env
@@ -262,23 +287,40 @@ class PrimitiveValidator:
                          type_exp = type(io['output']).__name__
                          type_got = type(res).__name__
                          
-                         # Check if result is an error dict
+                         # [PRESCRIPTION A] Explicit Failure Codes
+                         got_str = str(res)
                          if isinstance(res, dict) and "__error__" in res:
-                             got_str = f"EXCEPTION({res['__error__']}: {res['msg']})"
+                             error_type = res['__error__']
+                             msg = res['msg']
+                             if "Shape" in msg or "dimension" in msg:
+                                 got_str = f"FAIL:ShapeError({msg})"
+                             elif error_type == "TypeError":
+                                 got_str = f"FAIL:TypeError({msg})"
+                             elif error_type == "RecursionError":
+                                 got_str = f"FAIL:Timeout({msg})"
+                             else:
+                                 got_str = f"FAIL:{error_type}({msg})"
+                         elif res is None:
+                             got_str = "FAIL:None"
+                         elif isinstance(res, list) and not res and isinstance(io['output'], int):
+                             # Special case for Empty List vs Int (Shape Error)
+                             got_str = "FAIL:ShapeError(Expected Int, Got [])"
                          else:
-                             got_str = str(res)
                              if len(got_str) > 100: got_str = got_str[:100] + "..."
                              
                          print(f"  [Validator-Diag] Fail: Input={io['input']} ({type_in}) | Expected={io['output']} ({type_exp}) | Got={got_str} ({type_got})")
-                     except:
+                     except Exception:
+                         # Fallback if result is not indexable or len() fails
                          print(f"  [Validator-Diag] Fail: Input={io['input']} | Expected={io['output']} | Got={res}")
+                     return False # Return False on first failure for diagnostics
             except Exception as e:
                 if passes == 0:
                      print(f"  [Validator-Diag] Exception: {str(e)[:100]}")
-                pass
+                # If an exception occurs during execution, it's a failure
+                return False
         
-        score = passes / len(validation_ios)
-        if score == 1.0:
+        # If all tests pass, return True
+        if passes == len(validation_ios):
             print(f"[Validator] {name} passed regression suite (100%).")
             return True
         else:
@@ -819,8 +861,14 @@ class NeuroGeneticSynthesizer:
                 if not ops:
                     print("[Synthesizer] WARN: All ops banned by type constraint! Reverting.")
                     ops, weights = self.library.get_weighted_ops()
-                    
-        population = self._generate_initial_population(20, ops, weights)
+        
+        # [PRESCRIPTION C] Force Scalar Output Check
+        # If output is Int, we should force the root operator to be scalar-returning.
+        scalar_goal = False
+        if io_pairs and isinstance(io_pairs[0].get('output'), int):
+            scalar_goal = True
+            
+        population = self._generate_initial_population(20, ops, weights, scalar_goal=scalar_goal)
         
         generations = 0
         while time.time() - start_time < timeout:
@@ -855,19 +903,59 @@ class NeuroGeneticSynthesizer:
             
         return best_programs
 
-    def _generate_initial_population(self, size, ops, weights):
+        return best_programs
+
+    def _generate_initial_population(self, size, ops, weights, scalar_goal=False):
         pop = []
         for _ in range(size):
             # Generate random small expression trees
             depth = random.randint(1, 3)
-            pop.append(self._random_expr(depth, ops, weights))
+            pop.append(self._random_expr(depth, ops, weights, scalar_root=scalar_goal))
         return pop
 
-    def _random_expr(self, depth, ops, weights):
-        if depth <= 0 or random.random() < 0.3:
-            return "n" # Base terminal
+    def _random_expr(self, depth, ops, weights, scalar_root=False):
+        if depth <= 0 or (not scalar_root and random.random() < 0.3):
+             # If scalar_root is True, we CANNOT return 'n' (which might be a list/matrix).
+             # We MUST select a scalar op.
+             if scalar_root:
+                 pass # Force op selection
+             else:
+                return "n" # Base terminal
         
-        op = random.choices(ops, weights=weights, k=1)[0]
+        # [PRESCRIPTION C] Force Scalar Root Constraint
+        # If scalar_root is True, we must pick an operator that returns an Int/Scalar.
+        # We assume _UNARY_OPS contains scalar reducers (sum, len, etc.)
+        valid_ops = ops
+        valid_weights = weights
+        
+        if scalar_root:
+            # Filter ops to only those returning Int/Scalar
+            # This is heuristic-based on common naming or explicit lists
+            scalar_ops = {
+                'len', 'sum_list', 'prod_list', 'min_list', 'max_list', 'count_list',
+                'matrix_sum', 'row_sums', 'col_sums', 'index_of', 'count_val',
+                'add', 'sub', 'mul', 'div', 'mod', 'pow', 'abs_val', 'neg'
+            }
+            # row_sums/col_sums return List, remove them!
+            scalar_ops.difference_update({'row_sums', 'col_sums'})
+            
+            filtered = []
+            f_weights = []
+            for op, w in zip(ops, weights):
+                if op in scalar_ops:
+                    filtered.append(op)
+                    f_weights.append(w)
+            
+            if filtered:
+                valid_ops = filtered
+                valid_weights = f_weights
+        
+        if not valid_ops: # Fallback if no scalar ops found
+             if scalar_root: return "0" # Emergency constant
+             valid_ops = ops
+             valid_weights = weights
+
+        op = random.choices(valid_ops, weights=valid_weights, k=1)[0]
         # Basic Arity Check (Heuristic)
         # In a real system we'd inspect the signature.
         # Here we hardcode arity for Level 0, assume 1 for learned?
@@ -883,7 +971,8 @@ class NeuroGeneticSynthesizer:
         elif op in self._QUATERNARY_OPS:
             arity = 4
         
-        args = [self._random_expr(depth-1, ops, weights) for _ in range(arity)]
+        # Recursive calls do NOT enforce scalar_root (only the top level did)
+        args = [self._random_expr(depth-1, ops, weights, scalar_root=False) for _ in range(arity)]
         return f"{op}({', '.join(args)})"
 
     def _evaluate(self, code: str, io_pairs: List[Dict]) -> float:
