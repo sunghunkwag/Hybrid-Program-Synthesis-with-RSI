@@ -16243,19 +16243,48 @@ class HRMSidecar:
                     param_str = ", ".join(params)
                     lambda_src = f"lambda {param_str}: {code}"
                     
-                    # Compile
-                    func = eval(lambda_src, context)
-                    
-                    # Name it
-                    concept_name = f"concept_{self.concept_count}"
-                    self.synthesizer.register_primitive(concept_name, func)
-                    print(f"  [RSI] Registered executable primitive: {concept_name} -> {lambda_src}")
-                    
-                    # [PRESCRIPTION 3] Extract subtrees as reusable primitives
-                    self._extract_and_register_subtrees(code, context)
-                    
+                    # [FIX] Robust Compilation (Handle 'def' statements vs expressions)
+                    try:
+                        # Ensure context has necessary globals if missing
+                        if not context:
+                            context = self.synthesizer.library.runtime_primitives.copy()
+
+                        # Case 1: Full Function Definition (produced by HRMSidecar.dream)
+                        if code.strip().startswith("def "):
+                            exec(code, context)
+                            # Extract function name from 'def name('
+                            import re
+                            match = re.search(r"def\s+(\w+)\(", code)
+                            if match:
+                                func_name = match.group(1)
+                                func = context.get(func_name)
+                            else:
+                                raise ValueError("Could not parse function name from def statement")
+                                
+                        # Case 2: Expression (produced by raw synthesis)
+                        else:
+                            func = eval(lambda_src, context)
+                        
+                        # Name it
+                        concept_name = f"concept_{self.concept_count}"
+                        if func:
+                            self.synthesizer.register_primitive(concept_name, func)
+                            print(f"  [RSI] Registered executable primitive: {concept_name}")
+                        else:
+                             print(f"  [RSI] Failed to retrieve function object for {concept_name}")
+                        
+                        # [PRESCRIPTION 3] Extract subtrees as reusable primitives
+                        self._extract_and_register_subtrees(code, context)
+                        
+                    except SyntaxError as e:
+                         print(f"  [RSI] PRIMITIVE REGISTRATION FAILED: Invalid Syntax")
+                         print(f"  > Code: {code}")
+                         print(f"  > Lambda: {lambda_src}")
+                         print(f"  [RSI] PRIMITIVE REGISTRATION FAILED: {e}")
+                         print(f"  > Code: {code}")
+                         
                 except Exception as e:
-                    print(f"  [RSI] Failed to register primitive: {e}")
+                    print(f"  [RSI] Outer Registration Error: {e}")
             
             # [NEW] Register with ConceptTransferEngine for generalization
             if self.transfer_engine and ast_obj:
