@@ -13125,7 +13125,11 @@ class BSBinOp(BSExpr):
     op: str
     left: BSExpr
     right: BSExpr
-    def __repr__(self): return f"({self.left} {self.op} {self.right})"
+    def __repr__(self):
+        # min/max are function calls, not infix operators
+        if self.op in ['min', 'max']:
+            return f"{self.op}({self.left}, {self.right})"
+        return f"({self.left} {self.op} {self.right})"
 
 @dataclass(frozen=True)
 class BSArg(BSExpr):
@@ -13888,6 +13892,26 @@ class SafeInterpreter:
                 res = l * r
                 if abs(res) > 2000000: raise RuntimeError("Overflow")
                 return res
+            # Extended arithmetic operators
+            if curr_expr.op == '/':
+                if r == 0: return 0  # Safe division by zero
+                return l / r
+            if curr_expr.op == '//':
+                if r == 0: return 0  # Safe integer division by zero
+                return l // r
+            if curr_expr.op == '%':
+                if r == 0: return 0  # Safe modulo by zero
+                return l % r
+            if curr_expr.op == '**':
+                # Safe power with overflow protection
+                if abs(l) > 100 or abs(r) > 10: return 0
+                try:
+                    res = l ** r
+                    if abs(res) > 2000000: raise RuntimeError("Overflow")
+                    return res
+                except: return 0
+            if curr_expr.op == 'min': return min(l, r)
+            if curr_expr.op == 'max': return max(l, r)
             return 0
             
         if isinstance(curr_expr, BSRecCall):
@@ -13960,7 +13984,7 @@ class SafeInterpreter:
 # ==============================================================================
 # Global Constants
 # ==============================================================================
-NAVIGATOR_ATOM_MAP = ["+", "-", "*", "Rec", "Arg", "Const"]
+NAVIGATOR_ATOM_MAP = ["+", "-", "*", "/", "//", "%", "**", "min", "max", "Rec", "Arg", "Const"]
 
 # ==============================================================================
 # ==============================================================================
@@ -15299,8 +15323,18 @@ class BottomUpSynthesizer:
 
             next_bank = []
             
-            # Dynamic Ops Generation
-            ops_list = [('+', 2), ('-', 2), ('*', 2), ('Rec', 1)]
+            # Dynamic Ops Generation - Extended DSL
+            # Binary ops: (name, arity=2)
+            # Unary ops use arity=1 but are handled via Rec or custom mechanism
+            ops_list = [
+                # Core arithmetic (arity 2)
+                ('+', 2), ('-', 2), ('*', 2),
+                # Extended arithmetic (arity 2) - now supported by SafeInterpreter
+                ('/', 2), ('//', 2), ('%', 2), ('**', 2),
+                ('min', 2), ('max', 2),
+                # Recursion (arity 1)
+                ('Rec', 1),
+            ]
             if self.meta_state:
                 ops_list.extend([(name, self.meta_state.get_arity(name)) for name in self.meta_state.abstractions])
             
@@ -15317,8 +15351,10 @@ class BottomUpSynthesizer:
                 elif arity == 2:
                     for e1 in bank:
                         for e2 in bank:
-                            if op in ['+', '-', '*']: next_bank.append(BSBinOp(op, e1, e2))
-                            elif op in self.meta_state.abstractions:
+                            # Core and extended binary ops
+                            if op in ['+', '-', '*', '/', '//', '%', '**', 'min', 'max']:
+                                next_bank.append(BSBinOp(op, e1, e2))
+                            elif self.meta_state and op in self.meta_state.abstractions:
                                 next_bank.append(BSCustomOp(op, self.meta_state.abstractions[op], [e1, e2]))
 
             # Neural Sort (Implicit Search)
@@ -16561,8 +16597,8 @@ def run_hrm_life():
             with open(state_path, "rb") as f:
                 # SECURITY WARNING: Only load trusted pickles. Checksums or signatures recommended for public usage.
                 s = pickle.load(f)
-                gen.solved = s.get("solved", set())
-                gen.complexity = s.get("complexity", 1)
+                gen.solved_counts = s.get("solved_counts", {1:0, 2:0, 3:0, 4:0})
+                gen.current_level = s.get("current_level", 1)
                 mon.concepts = s.get("concepts", 0)
                 mon.tasks = s.get("tasks", 0)
         except: pass
@@ -16571,7 +16607,7 @@ def run_hrm_life():
     try:
         while True:
             cycle += 1
-            print(f"\n{'='*50} CYCLE {cycle} | L:{gen.complexity} | M:{cog.meta.meta_level} {'='*10}")
+            print(f"\n{'='*50} CYCLE {cycle} | L:{gen.current_level} | M:{cog.meta.meta_level} {'='*10}")
             
             name, ios = gen.generate()
             print(f"[Task] {name}")
@@ -16592,7 +16628,7 @@ def run_hrm_life():
                     print("[SUCCESS] ✅")
                     gen.report_solved(name); mon.record_task()
                     for code, expr, k, v in results:
-                        mon.record_concept(gen.complexity)
+                        mon.record_concept(gen.current_level)
                         print(f"  [Discovered] {expr}")
                         # Save checkpoint for RSI proof
                         try:
@@ -16621,7 +16657,7 @@ def run_hrm_life():
             if time.time() - last_save > 60:
                 try:
                     with open(state_path, "wb") as f:
-                        pickle.dump({"solved": gen.solved, "complexity": gen.complexity, "concepts": mon.concepts, "tasks": mon.tasks}, f)
+                        pickle.dump({"solved_counts": gen.solved_counts, "current_level": gen.current_level, "concepts": mon.concepts, "tasks": mon.tasks}, f)
                     last_save = time.time()
                 except: pass
             
@@ -16629,10 +16665,10 @@ def run_hrm_life():
     except KeyboardInterrupt:
         try:
             with open(state_path, "wb") as f:
-                pickle.dump({"solved": gen.solved, "complexity": gen.complexity, "concepts": mon.concepts, "tasks": mon.tasks}, f)
+                pickle.dump({"solved_counts": gen.solved_counts, "current_level": gen.current_level, "concepts": mon.concepts, "tasks": mon.tasks}, f)
         except: pass
         mon.status()
-        print(f"\n[Summary] Cycles:{cycle} Tasks:{len(gen.solved)} Meta:{cog.meta.meta_level}")
+        print(f"\n[Summary] Cycles:{cycle} Tasks:{sum(gen.solved_counts.values())} Meta:{cog.meta.meta_level}")
         if mon.accelerating(): print("🚀 ACCELERATION DETECTED!")
         print("Goodbye! 👋")
 
@@ -17097,7 +17133,7 @@ def main():
     elif args.command == "orchestrator-smoke":
         orchestrator_main()
     elif args.command == "hrm-life":
-        run_hrm_life_v2()
+        run_hrm_life()
     elif args.command == "synthesis":
         task_list = None
         if args.tasks:
