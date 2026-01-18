@@ -1,56 +1,37 @@
-"""
-Checkpoint inspection utility for RSI runs.
-
-WARNING: Pickle files can execute arbitrary code. Only inspect trusted checkpoints.
-"""
+"""Utility to inspect a single RSI checkpoint file."""
 from __future__ import annotations
 
 import argparse
-import os
 import pickle
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict
 
 
-def _load_checkpoint(path: str) -> Dict[str, Any]:
-    with open(path, "rb") as handle:
-        data = pickle.load(handle)
-    if isinstance(data, dict):
-        return data
-    return {"value": data}
-
-
-def inspect_checkpoints(directory: str, limit: int) -> List[Dict[str, Any]]:
-    if limit < 1:
-        raise ValueError("limit must be >= 1")
-    entries = sorted(os.listdir(directory))
-    results: List[Dict[str, Any]] = []
-    for name in entries[:limit]:
-        path = os.path.join(directory, name)
-        if not os.path.isfile(path):
-            continue
-        try:
-            payload = _load_checkpoint(path)
-        except Exception as exc:
-            payload = {"error": f"{type(exc).__name__}: {exc}"}
-        results.append({"file": name, "payload": payload})
-    return results
+def load_checkpoint(path: Path) -> Dict[str, Any]:
+    with path.open("rb") as handle:
+        payload = pickle.load(handle)
+    if not isinstance(payload, dict):
+        return {"raw": payload}
+    return payload
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Inspect RSI checkpoint pickle files")
-    parser.add_argument("--directory", default="checkpoints", help="Checkpoint directory")
-    parser.add_argument("--limit", type=int, default=10, help="Max files to inspect")
+    parser = argparse.ArgumentParser(description="Inspect a checkpoint pickle")
+    parser.add_argument("path", type=Path, help="Path to checkpoint .pkl file")
     args = parser.parse_args()
 
-    if not os.path.isdir(args.directory):
-        print(f"Directory not found: {args.directory}")
+    if not args.path.exists():
+        print(f"Checkpoint not found: {args.path}")
         return 1
 
-    results = inspect_checkpoints(args.directory, args.limit)
-    for result in results:
-        print(f"=== {result['file']} ===")
-        for key, value in result["payload"].items():
-            print(f"{key}: {value}")
+    payload = load_checkpoint(args.path)
+    print(f"Checkpoint: {args.path}")
+    for key in sorted(payload.keys()):
+        value = payload[key]
+        preview = value
+        if isinstance(value, (str, bytes)) and len(value) > 200:
+            preview = f"{value[:200]}..."
+        print(f"- {key}: {preview}")
     return 0
 
 

@@ -1,66 +1,51 @@
 # Refactor Plan
 
-## Overview
-This plan follows the required commit sequence while keeping changes bounded and testable. Each commit includes risk, tests, and rollback guidance.
+## Commit sequence
 
-## Commit Plan
+1) **Commit 1: add trace hooks**
+   - Add TRACE_EXEC env-controlled logging in Systemtest entrypoints.
+   - Add missing `inspect_checkpoint.py` as a tooling script (minimal, read-only).
+   - Risk: low.
+   - Tests: `python -m py_compile ...` (full list).
 
-### Commit 0 — Add missing inspect_checkpoint utility (preflight)
-- **Goal**: Create `inspect_checkpoint.py` to satisfy required preflight compile checks.
-- **Risk**: Low (new tooling script only).
-- **Tests**: `python -m py_compile inspect_checkpoint.py`.
-- **Rollback**: `git revert <commit>` to remove the file.
+2) **Commit 2: de-duplicate WatchdogExecutor**
+   - Ensure Systemtest imports WatchdogExecutor from watchdog_executor.py.
+   - Confirm all call sites use the shared executor.
+   - Risk: low.
+   - Tests: `python -m py_compile ...`.
 
-### Commit 1 — Add minimal tracing (no behavior change)
-- **Goal**: Add `TRACE_EXEC=1` environment flag to log key entrypoint hits without altering logic.
-- **Risk**: Low (log-only).
-- **Tests**: `python -m py_compile Systemtest.py`.
-- **Rollback**: `git revert <commit>`.
+3) **Commit 3: unify generated-code execution**
+   - Route generated program execution through WatchdogExecutor only.
+   - Remove raw exec in main process for generated code.
+   - Risk: medium.
+   - Tests: `pytest -q` + `python -m py_compile ...`.
 
-### Commit 2 — Remove duplicated WatchdogExecutor (single source of truth)
-- **Goal**: Remove any local duplicate `WatchdogExecutor` implementation and import from `watchdog_executor.py`.
-- **Risk**: Low (module-level swap).
-- **Tests**: `python -m py_compile Systemtest.py watchdog_executor.py`.
-- **Rollback**: `git revert <commit>`.
+4) **Commit 4: registry filename normalization**
+   - Default registry to `rsi_primitive_registry.json` with legacy fallback load only.
+   - Risk: low.
+   - Tests: `pytest -q` + `python -m py_compile ...`.
 
-### Commit 3 — Ban raw exec in main process for generated code
-- **Goal**: Ensure generated code executes only via `WatchdogExecutor` (child process). Replace direct `exec()` usage used for generated code and centralize helpers in `systemtest/execution.py`.
-- **Risk**: Medium (execution path changes).
-- **Tests**: pytest coverage for execution path + `python -m py_compile Systemtest.py`.
-- **Rollback**: `git revert <commit>`.
+5) **Commit 5: quarantine HRM v2**
+   - Move legacy HRM v2 into `systemtest/legacy/hrm_life_v2.py` and document in REMOVALS.
+   - Optional CLI stub to invoke legacy module when explicitly called.
+   - Risk: low.
+   - Tests: `python -m py_compile ...`.
 
-### Commit 4 — Registry filename normalization
-- **Goal**: Default to `rsi_primitive_registry.json` with fallback to `rsi_library_registry.json` (no auto-load of .bak).
-- **Risk**: Low (compatibility fallback).
-- **Tests**: Unit test for fallback load + `python -m py_compile library_manager.py`.
-- **Rollback**: `git revert <commit>`.
+6) **Commit 6: validator dedup**
+   - Create `systemtest/validators.py` and update Systemtest imports.
+   - Risk: medium.
+   - Tests: `pytest -q`.
 
-### Commit 5 — Quarantine HRM v2
-- **Goal**: Move unreachable HRM v2 entrypoint to `systemtest/legacy/hrm_life_v2.py` and gate it behind a subcommand if needed.
-- **Risk**: Low (legacy only).
-- **Tests**: `python -m py_compile Systemtest.py systemtest/legacy/hrm_life_v2.py`.
-- **Rollback**: `git revert <commit>`.
+7) **Commit 7: bounded RSI watchdog loop**
+   - Add `rsi_watchdog_loop.py` with explicit caps and artifact logging.
+   - Add tests for caps, watchdog timeout enforcement, and persistence.
+   - Risk: medium.
+   - Tests: `pytest -q` + short loop run.
 
-### Commit 6 — Validator dedup
-- **Goal**: Deduplicate validators into `systemtest/validators.py` and update call sites.
-- **Risk**: Medium (behavior alignment).
-- **Tests**: Golden-sample tests + pytest.
-- **Rollback**: `git revert <commit>`.
+## Risk & rollback
+- Rollback is `git revert` of commits in reverse order.
+- High-risk points: commit 3 (execution changes) and commit 6/7 (new modules/tests).
 
-### Commit 7 — Bounded RSI-style improvement harness
-- **Goal**: Add `rsi_watchdog_loop.py` with explicit caps and persistence artifacts. Ensure all generated code executes through `WatchdogExecutor`.
-- **Risk**: Medium (new runtime harness).
-- **Tests**: pytest (caps + timeout + persistence), short harness run.
-- **Rollback**: `git revert <commit>`.
-
-## Rollback Plan
-If any commit introduces regressions, revert in reverse order, starting from the last applied commit:
-```
-# Example: revert last 2 commits
-git revert HEAD~1..HEAD
-```
-
-## Test Plan Summary
-- `python -m py_compile` for all touched modules each commit.
-- `pytest -q` after validator and harness changes.
-- `TRACE_EXEC=1 python rsi_watchdog_loop.py --rounds 3 --trials 10` as a short bounded run.
+## Test plan per commit
+- Compile: `python -m py_compile ...` every commit.
+- Pytest coverage once tests are added, plus a short loop run after commit 7.

@@ -36,4 +36,5 @@ Desktop.ini
 checkpoints/
 brain/
 .gemini/
+rsi_verification_results.json
 runs/

@@ -1,1 +1,1 @@
-"""Systemtest helper modules."""
+"""Systemtest helper package."""

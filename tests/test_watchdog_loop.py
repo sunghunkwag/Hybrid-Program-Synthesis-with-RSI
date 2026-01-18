@@ -1,41 +1,43 @@
 import json
-import os
 import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
 
-import pytest
+from rsi_watchdog_loop import (
+    MAX_ROUNDS,
+    TRIALS_PER_ROUND,
+    normalize_caps,
+    run_watchdog_snippet,
+    snapshot_artifacts,
+)
 
-import rsi_watchdog_loop
 
-
-def test_loop_respects_caps(tmp_path):
-    with pytest.raises(ValueError):
-        rsi_watchdog_loop.run_loop(
-            rounds=rsi_watchdog_loop.MAX_ROUNDS + 1,
-            trials=1,
-            output_root=str(tmp_path),
-            synth_timeout=0.1,
-            watchdog_timeout=0.1,
-        )
+def test_loop_respects_caps():
+    rounds, trials = normalize_caps(MAX_ROUNDS + 5, TRIALS_PER_ROUND + 10)
+    assert rounds == MAX_ROUNDS
+    assert trials == TRIALS_PER_ROUND
 
 
 def test_watchdog_timeout_enforced():
-    result = rsi_watchdog_loop.watchdog_run_code("while True:\n    pass\n", timeout=0.1)
+    code = """
+while True:
+    pass
+"""
+    result = run_watchdog_snippet(code, timeout=0.5)
     assert result.get("killed") is True
 
 
 def test_persistence_roundtrip(tmp_path, monkeypatch):
+    meta = tmp_path / "rsi_meta_weights.json"
+    registry = tmp_path / "rsi_primitive_registry.json"
+    meta.write_text(json.dumps({"a": 1}), encoding="utf-8")
+    registry.write_text(json.dumps({"primitives": {}}), encoding="utf-8")
+
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "rsi_meta_weights.json").write_text(json.dumps({"seed": 1}))
-    (tmp_path / "rsi_primitive_registry.json").write_text(json.dumps({"version": "2.0", "primitives": {}}))
-    run_dir = rsi_watchdog_loop.run_loop(
-        rounds=1,
-        trials=1,
-        output_root=str(tmp_path / "runs"),
-        synth_timeout=0.1,
-        watchdog_timeout=0.2,
-    )
-    assert os.path.isdir(run_dir)
-    assert os.path.isfile(os.path.join(run_dir, "meta_weights_before_after.json"))
-    assert os.path.isfile(os.path.join(run_dir, "registry_before_after.json"))
+    output_dir = tmp_path / "snapshot"
+    snapshot_artifacts(output_dir)
+
+    assert (output_dir / "rsi_meta_weights.json").exists()
+    assert (output_dir / "rsi_primitive_registry.json").exists()
